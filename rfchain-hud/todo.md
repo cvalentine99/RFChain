@@ -259,3 +259,15 @@
 - [x] Create comprehensive DEPLOY.md for self-hosted deployment
 - [x] Add tests for local authentication (9 tests passing)
 - [x] All 99 tests passing
+
+## RAG v2 - Real Vector Search for Signal Data
+- [ ] Add FAISS vector store for local/offline vector search
+- [ ] Create signal metadata document schema for embedding
+- [ ] Implement chunking pipeline for spectral analysis results
+- [ ] Generate embeddings for all signal metadata fields
+- [ ] Store embeddings in FAISS index with signal ID mapping
+- [ ] Implement vector similarity search function
+- [ ] Update JARVIS chat to use RAG retrieval with context
+- [ ] Auto-index new analyses on completion
+- [ ] Add RAG search endpoint for direct queries
+- [ ] Test with real signal data
