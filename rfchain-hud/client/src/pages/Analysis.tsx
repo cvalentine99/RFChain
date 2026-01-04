@@ -1,6 +1,6 @@
 import { JarvisLayout } from "@/components/JarvisLayout";
 import { JarvisPanel, JarvisStat, JarvisStatusIndicator } from "@/components/JarvisPanel";
-import { Radio, Activity, Waves, BarChart3, Eye, ChevronRight, AlertTriangle, CheckCircle } from "lucide-react";
+import { Radio, Activity, Waves, BarChart3, Eye, ChevronRight, AlertTriangle, CheckCircle, Lightbulb, History, Target, Zap } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Link, useParams } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -453,6 +453,176 @@ function AnalysisDetail({ id }: { id: number }) {
             </div>
           </div>
         </JarvisPanel>
+
+        {/* RAG Context - Historical Insights */}
+        {fullMetrics?.rag_context && Object.keys(fullMetrics.rag_context).length > 0 && (
+          <div className="space-y-4">
+            {/* Pattern Matches */}
+            {fullMetrics.rag_context.pattern_matches?.length > 0 && (
+              <JarvisPanel title="Signal Pattern Matches" glowPulse>
+                <div className="flex items-start gap-3 mb-4">
+                  <Target className="w-6 h-6 text-cyan-400 flex-shrink-0" />
+                  <div>
+                    <h4 className="font-semibold text-cyan-400">Identified Signal Patterns</h4>
+                    <p className="text-sm text-muted-foreground">Based on spectral characteristics and modulation analysis</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {fullMetrics.rag_context.pattern_matches.map((match: any, i: number) => (
+                    <div key={i} className="p-3 bg-secondary/30 rounded-lg border border-cyan-500/30">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-medium text-cyan-400">{match.pattern_name}</span>
+                        <span className="text-xs px-2 py-1 bg-cyan-500/20 rounded">
+                          {(match.confidence * 100).toFixed(0)}% confidence
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{match.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </JarvisPanel>
+            )}
+
+            {/* Recommendations */}
+            {fullMetrics.rag_context.recommendations?.length > 0 && (
+              <JarvisPanel title="Recommendations">
+                <div className="flex items-start gap-3 mb-4">
+                  <Lightbulb className="w-6 h-6 text-yellow-400 flex-shrink-0" />
+                  <div>
+                    <h4 className="font-semibold text-yellow-400">Suggested Actions</h4>
+                    <p className="text-sm text-muted-foreground">Based on detected anomalies and historical solutions</p>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {fullMetrics.rag_context.recommendations.map((rec: any, i: number) => (
+                    <div key={i} className="p-3 bg-secondary/30 rounded-lg border border-yellow-500/30">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Zap className="w-4 h-4 text-yellow-400" />
+                        <span className="font-medium">{rec.action}</span>
+                        {rec.success_rate && (
+                          <span className="text-xs px-2 py-0.5 bg-green-500/20 text-green-400 rounded ml-auto">
+                            {(rec.success_rate * 100).toFixed(0)}% success rate
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">{rec.reason}</p>
+                      {rec.based_on?.length > 0 && (
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Based on: {rec.based_on.join(", ")}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </JarvisPanel>
+            )}
+
+            {/* Quality Comparison */}
+            {fullMetrics.rag_context.quality_comparison && (
+              <JarvisPanel title="Quality Assessment">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-secondary/30 rounded-lg">
+                    <h5 className="text-sm font-medium text-muted-foreground mb-2">Overall Quality</h5>
+                    <p className="text-lg font-semibold capitalize">
+                      {fullMetrics.rag_context.quality_comparison.quality_assessment || "Unknown"}
+                    </p>
+                    {fullMetrics.rag_context.quality_comparison.snr_vs_average !== null && (
+                      <p className="text-sm text-muted-foreground mt-1">
+                        SNR is {fullMetrics.rag_context.quality_comparison.snr_vs_average > 0 ? "+" : ""}
+                        {fullMetrics.rag_context.quality_comparison.snr_vs_average?.toFixed(1)} dB vs average
+                      </p>
+                    )}
+                  </div>
+                  {fullMetrics.rag_context.quality_comparison.snr_percentile !== null && (
+                    <div className="p-4 bg-secondary/30 rounded-lg">
+                      <h5 className="text-sm font-medium text-muted-foreground mb-2">Percentile Ranking</h5>
+                      <p className="text-lg font-semibold">
+                        Top {(100 - fullMetrics.rag_context.quality_comparison.snr_percentile).toFixed(0)}%
+                      </p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Better than {fullMetrics.rag_context.quality_comparison.snr_percentile?.toFixed(0)}% of similar signals
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </JarvisPanel>
+            )}
+
+            {/* Similar Signals */}
+            {fullMetrics.rag_context.similar_signals?.length > 0 && (
+              <JarvisPanel title="Similar Historical Signals">
+                <div className="flex items-start gap-3 mb-4">
+                  <History className="w-6 h-6 text-primary flex-shrink-0" />
+                  <div>
+                    <h4 className="font-semibold">Related Signals from History</h4>
+                    <p className="text-sm text-muted-foreground">Signals with similar characteristics</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {fullMetrics.rag_context.similar_signals.slice(0, 5).map((signal: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
+                      <div>
+                        <span className="font-medium">{signal.filename}</span>
+                        <span className="text-xs text-muted-foreground ml-2">
+                          {signal.analysis_date}
+                        </span>
+                      </div>
+                      <span className="text-sm px-2 py-1 bg-primary/20 rounded">
+                        {(signal.similarity_score * 100).toFixed(0)}% match
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </JarvisPanel>
+            )}
+
+            {/* Modulation Context */}
+            {fullMetrics.rag_context.modulation_context?.typical_applications?.length > 0 && (
+              <JarvisPanel title="Modulation Analysis Context">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h5 className="text-sm font-medium text-muted-foreground mb-2">Detected Modulation</h5>
+                    <p className="text-lg font-semibold">
+                      {fullMetrics.rag_context.modulation_context.detected_modulation || "Unknown"}
+                    </p>
+                  </div>
+                  <div>
+                    <h5 className="text-sm font-medium text-muted-foreground mb-2">Typical Applications</h5>
+                    <ul className="text-sm space-y-1">
+                      {fullMetrics.rag_context.modulation_context.typical_applications.map((app: string, i: number) => (
+                        <li key={i}>• {app}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </JarvisPanel>
+            )}
+
+            {/* Spectral Context */}
+            {fullMetrics.rag_context.spectral_context && (
+              <JarvisPanel title="Spectral Classification">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 bg-secondary/30 rounded-lg">
+                    <h5 className="text-sm font-medium text-muted-foreground mb-2">Bandwidth Class</h5>
+                    <p className="text-lg font-semibold capitalize">
+                      {fullMetrics.rag_context.spectral_context.bandwidth_classification || "Unknown"}
+                    </p>
+                  </div>
+                  {fullMetrics.rag_context.spectral_context.frequency_band_guess?.length > 0 && (
+                    <div className="p-4 bg-secondary/30 rounded-lg md:col-span-2">
+                      <h5 className="text-sm font-medium text-muted-foreground mb-2">Possible Frequency Bands</h5>
+                      <div className="flex flex-wrap gap-2">
+                        {fullMetrics.rag_context.spectral_context.frequency_band_guess.map((band: string, i: number) => (
+                          <span key={i} className="text-xs px-2 py-1 bg-primary/20 rounded">{band}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </JarvisPanel>
+            )}
+          </div>
+        )}
 
         {/* Analysis Configuration */}
         {fullMetrics?.analysis_config && (

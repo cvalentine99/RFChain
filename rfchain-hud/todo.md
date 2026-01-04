@@ -271,3 +271,20 @@
 - [ ] Auto-index new analyses on completion
 - [ ] Add RAG search endpoint for direct queries
 - [ ] Test with real signal data
+
+
+## RAG-Augmented Analysis Pipeline (NEW)
+- [ ] Create RAG context engine that queries during analysis
+- [ ] Add anomaly context queries ("What caused similar DC spikes?")
+- [ ] Add modulation similarity queries ("Similar QAM-128 signals in history")
+- [ ] Add signal quality queries ("How did we fix similar poor SNR?")
+- [ ] Add spectral signature matching ("Match against historical patterns")
+- [ ] Implement historical pattern matching with similarity scores
+- [ ] Add recommendation engine based on past solutions
+- [ ] Enhance JSON output with RAG context fields:
+  - similar_signals: list of matching historical signals
+  - pattern_matches: known signal profiles matched
+  - recommendations: actionable suggestions from history
+  - quality_comparison: how this signal compares to average
+- [ ] Integrate RAG queries into Python analysis script
+- [ ] Add RAG context to plot annotations

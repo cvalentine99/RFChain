@@ -2629,83 +2629,6 @@ class DigitalSignalAnalysis:
 
 
 # =============================================================================
-# PLOT ANNOTATIONS: Embedded analysis data for annotated visualizations
-# =============================================================================
-
-@dataclass
-class PlotAnnotations:
-    """
-    Container for plot annotation data computed from signal analysis.
-
-    This enables overlay of key findings directly on each plot type,
-    making visualizations self-documenting for forensic analysis.
-    """
-    # Signal metrics (from compute_metrics)
-    metrics: Optional['SignalMetrics'] = None
-
-    # Anomaly data (from detect_anomalies)
-    anomalies: Optional[Dict[str, Any]] = None
-
-    # Time domain annotations
-    rms_amplitude: float = 0.0
-    peak_amplitude: float = 0.0
-    peak_sample_idx: int = 0
-    dropout_regions: List[Tuple[int, int]] = field(default_factory=list)
-    saturation_regions: List[Tuple[int, int]] = field(default_factory=list)
-
-    # Frequency domain annotations
-    noise_floor_db: float = -100.0
-    spectral_peaks: List[Tuple[float, float]] = field(default_factory=list)  # (freq_hz, power_db)
-    spurious_signals: List[Tuple[float, float]] = field(default_factory=list)  # (freq_hz, power_db)
-    bandwidth_low_hz: float = 0.0
-    bandwidth_high_hz: float = 0.0
-    dc_spike_power_db: float = -np.inf
-
-    # Spectrogram annotations
-    hopping_detected: bool = False
-    hopping_pattern: List[Tuple[float, float, float]] = field(default_factory=list)  # (time_s, freq_hz, duration_s)
-    bandwidth_boundaries: Tuple[float, float] = (0.0, 0.0)
-
-    # Constellation annotations
-    detected_modulation: str = "Unknown"
-    modulation_order: int = 0
-    evm_percent: float = 0.0
-    phase_error_deg: float = 0.0
-    ideal_constellation_points: List[complex] = field(default_factory=list)
-    snr_from_evm_db: float = 0.0
-
-    # Forensic watermark info
-    file_hash: str = ""
-    analysis_timestamp: str = ""
-    analyst_id: str = ""
-    chain_verified: bool = False
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'rms_amplitude': float(self.rms_amplitude),
-            'peak_amplitude': float(self.peak_amplitude),
-            'peak_sample_idx': self.peak_sample_idx,
-            'dropout_regions': self.dropout_regions,
-            'saturation_regions': self.saturation_regions,
-            'noise_floor_db': float(self.noise_floor_db),
-            'spectral_peaks': [(float(f), float(p)) for f, p in self.spectral_peaks],
-            'spurious_signals': [(float(f), float(p)) for f, p in self.spurious_signals],
-            'bandwidth_low_hz': float(self.bandwidth_low_hz),
-            'bandwidth_high_hz': float(self.bandwidth_high_hz),
-            'dc_spike_power_db': float(self.dc_spike_power_db),
-            'hopping_detected': self.hopping_detected,
-            'detected_modulation': self.detected_modulation,
-            'modulation_order': self.modulation_order,
-            'evm_percent': float(self.evm_percent),
-            'phase_error_deg': float(self.phase_error_deg),
-            'snr_from_evm_db': float(self.snr_from_evm_db),
-            'file_hash': self.file_hash,
-            'analysis_timestamp': self.analysis_timestamp,
-            'chain_verified': self.chain_verified,
-        }
-
-
-# =============================================================================
 # V3 DATACLASSES: FFT Debug, PN Sequence, Bit/Frame Analysis
 # =============================================================================
 
@@ -3711,320 +3634,7 @@ class SignalAnalyzer:
                 'grid': '#cccccc',
                 'text': '#000000'
             }
-
-    # =========================================================================
-    # ANNOTATION HELPER METHODS: For embedding analysis in plots
-    # =========================================================================
-
-    def _add_summary_textbox(self, ax, lines: List[str], loc: str = 'upper left',
-                              fontsize: int = 9, alpha: float = 0.85):
-        """
-        Add a semi-transparent text box with summary information to a plot.
-
-        Args:
-            ax: Matplotlib axes object
-            lines: List of text lines to display
-            loc: Location ('upper left', 'upper right', 'lower left', 'lower right')
-            fontsize: Font size for text
-            alpha: Background transparency
-        """
-        text = '\n'.join(lines)
-        props = dict(boxstyle='round,pad=0.5', facecolor='black' if self.config.dark_theme else 'white',
-                     alpha=alpha, edgecolor=self.colors['primary'])
-
-        # Determine anchor position
-        loc_map = {
-            'upper left': (0.02, 0.98, 'top', 'left'),
-            'upper right': (0.98, 0.98, 'top', 'right'),
-            'lower left': (0.02, 0.02, 'bottom', 'left'),
-            'lower right': (0.98, 0.02, 'bottom', 'right'),
-        }
-        x, y, va, ha = loc_map.get(loc, (0.02, 0.98, 'top', 'left'))
-
-        ax.text(x, y, text, transform=ax.transAxes, fontsize=fontsize,
-                verticalalignment=va, horizontalalignment=ha,
-                fontfamily='monospace', color=self.colors['text'], bbox=props)
-
-    def _add_forensic_watermark(self, fig, file_hash: str = "", timestamp: str = "",
-                                 analyst: str = "", verified: bool = True):
-        """
-        Add forensic watermark to bottom of figure for chain of custody.
-
-        Args:
-            fig: Matplotlib figure object
-            file_hash: SHA-256 hash (truncated for display)
-            timestamp: ISO timestamp of analysis
-            analyst: Analyst identifier
-            verified: Whether chain of custody is verified
-        """
-        hash_short = file_hash[:16] + "..." if len(file_hash) > 16 else file_hash
-        status = "VERIFIED" if verified else "UNVERIFIED"
-        watermark = f"SHA-256: {hash_short} | {timestamp} | {analyst} | Chain: {status}"
-
-        fig.text(0.5, 0.01, watermark, ha='center', va='bottom',
-                fontsize=7, fontfamily='monospace',
-                color='#888888' if self.config.dark_theme else '#666666',
-                alpha=0.8)
-
-    def _mark_anomaly_region(self, ax, start_x, end_x, label: str = "",
-                              color: str = None, alpha: float = 0.2):
-        """
-        Shade a region to highlight an anomaly (e.g., dropout, saturation).
-
-        Args:
-            ax: Matplotlib axes object
-            start_x: Start of region in x-axis units
-            end_x: End of region in x-axis units
-            label: Optional label for the region
-            color: Color for shading (defaults to secondary/red)
-            alpha: Transparency of shading
-        """
-        color = color or self.colors['secondary']
-        ax.axvspan(start_x, end_x, alpha=alpha, color=color, label=label)
-
-    def _add_peak_marker(self, ax, x, y, label: str = "", color: str = None):
-        """
-        Add a marker and annotation for a peak value.
-
-        Args:
-            ax: Matplotlib axes object
-            x: X-coordinate of peak
-            y: Y-coordinate of peak
-            label: Label text for the peak
-            color: Marker color (defaults to quaternary/yellow)
-        """
-        color = color or self.colors['quaternary']
-        ax.plot(x, y, 'v', markersize=8, color=color, markeredgecolor='white',
-                markeredgewidth=0.5)
-        if label:
-            ax.annotate(label, (x, y), textcoords="offset points", xytext=(0, 10),
-                       ha='center', fontsize=8, color=color,
-                       bbox=dict(boxstyle='round,pad=0.2', facecolor='black',
-                                alpha=0.7, edgecolor='none'))
-
-    def _add_horizontal_marker(self, ax, y_val: float, label: str = "",
-                                linestyle: str = '--', color: str = None):
-        """
-        Add a horizontal reference line with label.
-
-        Args:
-            ax: Matplotlib axes object
-            y_val: Y-coordinate for the horizontal line
-            label: Label text for the line
-            linestyle: Line style ('--', '-.', ':')
-            color: Line color
-        """
-        color = color or self.colors['quaternary']
-        ax.axhline(y=y_val, color=color, linestyle=linestyle, alpha=0.7,
-                  linewidth=1.5, label=label)
-
-    def _shade_bandwidth_region(self, ax, center_freq: float, bandwidth: float,
-                                  freq_unit: float = 1e3, color: str = None):
-        """
-        Shade the occupied bandwidth region on a frequency plot.
-
-        Args:
-            ax: Matplotlib axes object
-            center_freq: Center frequency offset in Hz
-            bandwidth: Bandwidth in Hz
-            freq_unit: Frequency unit for conversion (1e3 for kHz)
-            color: Fill color (defaults to tertiary/cyan)
-        """
-        color = color or self.colors['tertiary']
-        low = (center_freq - bandwidth / 2) / freq_unit
-        high = (center_freq + bandwidth / 2) / freq_unit
-        ax.axvspan(low, high, alpha=0.15, color=color, label=f'BW: {bandwidth/1e3:.1f} kHz')
-
-    def _compute_plot_annotations(self, data: cp.ndarray, metrics: SignalMetrics = None,
-                                   anomalies: Dict[str, Any] = None) -> PlotAnnotations:
-        """
-        Compute comprehensive annotations for all plot types.
-
-        This method analyzes the signal data to extract key findings for
-        visualization overlays.
-
-        Args:
-            data: Complex signal data (GPU array)
-            metrics: Pre-computed SignalMetrics (optional)
-            anomalies: Pre-computed anomaly detection results (optional)
-
-        Returns:
-            PlotAnnotations object with all computed annotation data
-        """
-        annotations = PlotAnnotations()
-        annotations.metrics = metrics
-        annotations.anomalies = anomalies
-
-        data_np = cp_asnumpy(data[:min(len(data), 500000)])
-
-        # Time domain annotations
-        magnitude = np.abs(data_np)
-        annotations.rms_amplitude = float(np.sqrt(np.mean(magnitude ** 2)))
-        annotations.peak_amplitude = float(np.max(magnitude))
-        annotations.peak_sample_idx = int(np.argmax(magnitude))
-
-        # Detect dropout regions (power < 1% of average)
-        avg_power = np.mean(magnitude ** 2)
-        threshold = avg_power * 0.01
-        power = magnitude ** 2
-        is_dropout = power < threshold
-        # Find contiguous dropout regions
-        diff = np.diff(is_dropout.astype(int))
-        starts = np.where(diff == 1)[0] + 1
-        ends = np.where(diff == -1)[0] + 1
-        if is_dropout[0]:
-            starts = np.insert(starts, 0, 0)
-        if is_dropout[-1]:
-            ends = np.append(ends, len(is_dropout))
-        for s, e in zip(starts[:10], ends[:10]):  # Limit to 10 regions
-            if e - s > 100:  # Only significant dropouts
-                annotations.dropout_regions.append((int(s), int(e)))
-
-        # Detect saturation regions (>99% of max)
-        max_val = np.max(magnitude)
-        is_saturated = magnitude > max_val * 0.999
-        diff = np.diff(is_saturated.astype(int))
-        starts = np.where(diff == 1)[0] + 1
-        ends = np.where(diff == -1)[0] + 1
-        if is_saturated[0]:
-            starts = np.insert(starts, 0, 0)
-        if is_saturated[-1]:
-            ends = np.append(ends, len(is_saturated))
-        for s, e in zip(starts[:10], ends[:10]):
-            if e - s > 10:
-                annotations.saturation_regions.append((int(s), int(e)))
-
-        # Frequency domain annotations
-        fft_size = min(len(data_np), self.config.fft_size * 16)
-        spectrum = np.fft.fftshift(np.fft.fft(data_np[:fft_size], n=self.config.fft_size))
-        mag_db = 20 * np.log10(np.abs(spectrum) + 1e-12)
-
-        # Noise floor estimation (median-based)
-        median_val = np.median(mag_db)
-        mad = np.median(np.abs(mag_db - median_val))
-        sigma_estimate = 1.4826 * mad
-        noise_mask = mag_db < (median_val + 3 * sigma_estimate)
-        if np.sum(noise_mask) > len(mag_db) * 0.1:
-            annotations.noise_floor_db = float(np.median(mag_db[noise_mask]))
-        else:
-            annotations.noise_floor_db = float(median_val)
-
-        # Find spectral peaks (above noise floor + 10 dB)
-        peak_threshold = annotations.noise_floor_db + 10
-        freq_resolution = self.config.sample_rate / self.config.fft_size
-        freqs = np.linspace(-self.config.sample_rate/2, self.config.sample_rate/2, len(mag_db))
-
-        # Simple peak detection
-        peaks_mask = (mag_db > peak_threshold) & (mag_db > np.roll(mag_db, 1)) & (mag_db > np.roll(mag_db, -1))
-        peak_indices = np.where(peaks_mask)[0]
-        peak_powers = mag_db[peak_indices]
-        sorted_idx = np.argsort(peak_powers)[::-1][:5]  # Top 5 peaks
-        for idx in sorted_idx:
-            peak_idx = peak_indices[idx]
-            annotations.spectral_peaks.append((float(freqs[peak_idx]), float(mag_db[peak_idx])))
-
-        # DC spike detection
-        center_idx = len(mag_db) // 2
-        annotations.dc_spike_power_db = float(mag_db[center_idx])
-
-        # Detect spurious signals (isolated peaks far from main signal)
-        if metrics and metrics.bandwidth_estimate_hz > 0:
-            main_bw_low = -metrics.bandwidth_estimate_hz / 2 + metrics.center_freq_offset_hz
-            main_bw_high = metrics.bandwidth_estimate_hz / 2 + metrics.center_freq_offset_hz
-            annotations.bandwidth_low_hz = main_bw_low
-            annotations.bandwidth_high_hz = main_bw_high
-
-            for freq, power in annotations.spectral_peaks:
-                if freq < main_bw_low * 0.8 or freq > main_bw_high * 0.8:
-                    if power > annotations.noise_floor_db + 15:
-                        annotations.spurious_signals.append((freq, power))
-
-        # Constellation / Modulation analysis
-        annotations.detected_modulation, annotations.modulation_order, \
-            annotations.evm_percent, annotations.phase_error_deg, \
-            annotations.ideal_constellation_points = self._detect_modulation(data_np)
-
-        # EVM to SNR conversion: SNR_dB ≈ -20*log10(EVM/100)
-        if annotations.evm_percent > 0:
-            annotations.snr_from_evm_db = float(-20 * np.log10(annotations.evm_percent / 100))
-
-        return annotations
-
-    def _detect_modulation(self, data_np: np.ndarray) -> Tuple[str, int, float, float, List[complex]]:
-        """
-        Detect modulation type and compute EVM from constellation.
-
-        Returns:
-            (modulation_name, order, evm_percent, phase_error_deg, ideal_points)
-        """
-        # Normalize data
-        data_norm = data_np / (np.max(np.abs(data_np)) + 1e-12)
-
-        # Check for common modulation patterns
-        n_samples = min(len(data_norm), 50000)
-        subset = data_norm[:n_samples]
-
-        # Compute phase histogram to detect PSK orders
-        phases = np.angle(subset)
-        phase_hist, _ = np.histogram(phases, bins=36)
-        phase_peaks = np.sum(phase_hist > np.max(phase_hist) * 0.3)
-
-        # Compute amplitude histogram for QAM detection
-        amplitudes = np.abs(subset)
-        amp_hist, _ = np.histogram(amplitudes, bins=20)
-        amp_levels = np.sum(amp_hist > np.max(amp_hist) * 0.2)
-
-        # Decision logic
-        ideal_points = []
-        modulation = "Unknown"
-        order = 0
-        evm = 0.0
-        phase_error = 0.0
-
-        if amp_levels <= 2:
-            # Likely PSK
-            if phase_peaks <= 2:
-                modulation = "BPSK"
-                order = 2
-                ideal_points = [complex(1, 0), complex(-1, 0)]
-            elif phase_peaks <= 4:
-                modulation = "QPSK"
-                order = 4
-                ideal_points = [complex(1, 1)/np.sqrt(2), complex(-1, 1)/np.sqrt(2),
-                               complex(-1, -1)/np.sqrt(2), complex(1, -1)/np.sqrt(2)]
-            elif phase_peaks <= 8:
-                modulation = "8PSK"
-                order = 8
-                ideal_points = [np.exp(1j * k * np.pi / 4) for k in range(8)]
-        elif amp_levels <= 4:
-            if phase_peaks <= 4:
-                modulation = "16QAM"
-                order = 16
-                # Simplified 16QAM ideal points
-                for i in [-3, -1, 1, 3]:
-                    for q in [-3, -1, 1, 3]:
-                        ideal_points.append(complex(i, q) / 3.0)
-
-        # Compute EVM if we have ideal points
-        if ideal_points:
-            # Find nearest ideal point for each sample
-            errors = []
-            phase_errors = []
-            for sample in subset[::100]:  # Subsample for speed
-                distances = [abs(sample - ip) for ip in ideal_points]
-                min_idx = np.argmin(distances)
-                errors.append(distances[min_idx])
-                # Phase error
-                phase_errors.append(np.angle(sample) - np.angle(ideal_points[min_idx]))
-
-            rms_error = np.sqrt(np.mean(np.array(errors) ** 2))
-            ref_power = np.sqrt(np.mean(np.abs(subset) ** 2))
-            if ref_power > 0:
-                evm = float(rms_error / ref_power * 100)
-            phase_error = float(np.std(phase_errors) * 180 / np.pi)
-
-        return modulation, order, evm, phase_error, ideal_points
-
+    
     def compute_metrics(self, data: cp.ndarray) -> SignalMetrics:
         """Compute comprehensive signal statistics on GPU."""
         metrics = SignalMetrics()
@@ -4156,34 +3766,15 @@ class SignalAnalyzer:
             return 0.0, 0.0
     
     def plot_time_domain(self, data: cp.ndarray, filename: str = "01_time_domain.png",
-                         source_name: str = "", annotations: PlotAnnotations = None):
-        """
-        Generate annotated I/Q time domain plot with envelope.
-
-        Annotations include:
-        - RMS amplitude reference line
-        - Peak amplitude marker
-        - Dropout regions (shaded red)
-        - Saturation regions (shaded orange)
-        - Summary text box with key metrics
-        """
+                         source_name: str = ""):
+        """Generate I/Q time domain plot with envelope."""
         n_samples = min(len(data), self.config.time_domain_samples)
         subset = cp_asnumpy(data[:n_samples])
 
         time_us = np.arange(n_samples) / self.config.sample_rate * 1e6
-        duration_ms = n_samples / self.config.sample_rate * 1e3
         envelope = np.abs(subset)
 
-        # Compute local annotations if not provided
-        rms_amplitude = np.sqrt(np.mean(envelope ** 2))
-        peak_amplitude = np.max(envelope)
-        peak_idx = np.argmax(envelope)
-        peak_time_us = time_us[peak_idx]
-
-        # Convert to dBFS (assuming full scale = 1.0)
-        peak_dbfs = 20 * np.log10(peak_amplitude + 1e-12)
-
-        fig, axes = plt.subplots(2, 1, figsize=(14, 9), sharex=True)
+        fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
 
         # I/Q Plot
         axes[0].plot(time_us, subset.real, label='I',
@@ -4195,93 +3786,26 @@ class SignalAnalyzer:
         axes[0].grid(True, alpha=0.3, color=self.colors['grid'])
         axes[0].set_title('I/Q Components', fontsize=12)
 
-        # Envelope Plot with annotations
+        # Envelope Plot
         axes[1].fill_between(time_us, envelope, alpha=0.3, color=self.colors['tertiary'])
         axes[1].plot(time_us, envelope, color=self.colors['tertiary'], linewidth=0.8)
-
-        # Add RMS amplitude reference line
-        self._add_horizontal_marker(axes[1], rms_amplitude,
-                                   label=f'RMS: {rms_amplitude:.4f}',
-                                   linestyle='--', color=self.colors['quaternary'])
-
-        # Mark peak amplitude
-        self._add_peak_marker(axes[1], peak_time_us, peak_amplitude,
-                             label=f'Peak: {peak_amplitude:.4f}')
-
-        # Shade anomaly regions if annotations provided
-        if annotations:
-            # Dropout regions (red)
-            for i, (start, end) in enumerate(annotations.dropout_regions[:5]):
-                start_us = start / self.config.sample_rate * 1e6
-                end_us = end / self.config.sample_rate * 1e6
-                if start_us < time_us[-1] and end_us > time_us[0]:
-                    label = 'Dropout' if i == 0 else ''
-                    self._mark_anomaly_region(axes[1], max(start_us, time_us[0]),
-                                            min(end_us, time_us[-1]),
-                                            label=label, color='#ff4444', alpha=0.3)
-
-            # Saturation regions (orange)
-            for i, (start, end) in enumerate(annotations.saturation_regions[:5]):
-                start_us = start / self.config.sample_rate * 1e6
-                end_us = end / self.config.sample_rate * 1e6
-                if start_us < time_us[-1] and end_us > time_us[0]:
-                    label = 'Saturation' if i == 0 else ''
-                    self._mark_anomaly_region(axes[1], max(start_us, time_us[0]),
-                                            min(end_us, time_us[-1]),
-                                            label=label, color='#ff8800', alpha=0.3)
-
         axes[1].set_ylabel('Magnitude', fontsize=11)
         axes[1].set_xlabel('Time (μs)', fontsize=11)
         axes[1].grid(True, alpha=0.3, color=self.colors['grid'])
-        axes[1].set_title('Signal Envelope (Annotated)', fontsize=12)
-        axes[1].legend(loc='upper right', fontsize=8)
-
-        # Add summary text box
-        summary_lines = [
-            f"Duration: {duration_ms:.3f} ms",
-            f"Samples: {n_samples:,}",
-            f"Peak: {peak_dbfs:.1f} dBFS",
-            f"RMS: {rms_amplitude:.4f}",
-            f"Crest Factor: {peak_amplitude/rms_amplitude:.2f}",
-        ]
-        if annotations and annotations.anomalies:
-            if annotations.anomalies.get('dropout'):
-                summary_lines.append(f"Dropouts: {len(annotations.dropout_regions)}")
-            if annotations.anomalies.get('saturation'):
-                summary_lines.append(f"Saturation: {len(annotations.saturation_regions)}")
-        self._add_summary_textbox(axes[0], summary_lines, loc='upper left', fontsize=8)
+        axes[1].set_title('Signal Envelope', fontsize=12)
 
         header = self._get_plot_header(source_name)
         fig.suptitle(f'Time Domain Analysis ({n_samples:,} samples)\n{header}', fontsize=12)
-
-        # Add forensic watermark if available
-        if annotations and annotations.file_hash:
-            self._add_forensic_watermark(fig, annotations.file_hash,
-                                        annotations.analysis_timestamp,
-                                        annotations.analyst_id,
-                                        annotations.chain_verified)
-
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+        plt.tight_layout()
         self._save_figure(fig, filename)
     
     def plot_frequency_domain(self, data: cp.ndarray,
                               filename: str = "02_frequency_domain.png",
-                              is_fft_data: bool = False, source_name: str = "",
-                              annotations: PlotAnnotations = None):
-        """
-        Generate annotated PSD plot with embedded analysis.
-
-        Annotations include:
-        - Occupied bandwidth shaded region
-        - Spectral peak markers with frequency labels
-        - Noise floor dashed line
-        - Spurious signal arrows
-        - DC spike indicator
-        - Summary text box with key findings
-        """
+                              is_fft_data: bool = False, source_name: str = ""):
+        """Generate PSD plot with annotations."""
         with gpu_memory_pool():
             n = min(len(data), self.config.fft_size * 64)
-
+            
             if is_fft_data:
                 # Data is already FFT output
                 spectrum = cp.fft.fftshift(data[:self.config.fft_size])
@@ -4290,239 +3814,97 @@ class SignalAnalyzer:
                 n_segments = n // self.config.fft_size
                 if n_segments == 0:
                     n_segments = 1
-
+                
                 psd_accum = cp.zeros(self.config.fft_size)
                 window = cp.hanning(self.config.fft_size)
-
+                
                 for i in range(n_segments):
                     segment = data[i * self.config.fft_size:(i + 1) * self.config.fft_size]
                     if len(segment) < self.config.fft_size:
                         segment = cp.pad(segment, (0, self.config.fft_size - len(segment)))
                     windowed = segment * window
                     psd_accum += cp.abs(cp.fft.fft(windowed)) ** 2
-
+                
                 # FORENSIC FIX: Apply ENBW correction
+                # ENBW corrects for the noise bandwidth widening caused by windowing
+                # PSD_corrected = PSD_raw / ENBW to get true power spectral density
                 enbw = compute_enbw(cp_asnumpy(window))
+                
+                # Apply ENBW correction: divide by ENBW to normalize for window effects
                 spectrum = cp.fft.fftshift(psd_accum / n_segments / enbw)
                 log.debug(f"FORENSIC: Applied ENBW correction factor: {enbw:.4f}")
-
+            
             magnitude_db = 10 * cp.log10(cp.abs(spectrum) + 1e-12)
             mag_cpu = cp_asnumpy(magnitude_db)
-
-        freqs_hz = np.linspace(-self.config.sample_rate/2,
-                              self.config.sample_rate/2,
-                              len(mag_cpu))
-        freqs = freqs_hz / 1e3  # kHz
-
-        fig, ax = plt.subplots(figsize=(14, 7))
+        
+        freqs = np.linspace(-self.config.sample_rate/2, 
+                           self.config.sample_rate/2, 
+                           len(mag_cpu)) / 1e3  # kHz
+        
+        fig, ax = plt.subplots(figsize=(14, 6))
         ax.plot(freqs, mag_cpu, color=self.colors['primary'], linewidth=0.8)
-        ax.fill_between(freqs, mag_cpu, mag_cpu.min(), alpha=0.2,
+        ax.fill_between(freqs, mag_cpu, mag_cpu.min(), alpha=0.2, 
                        color=self.colors['primary'])
-
-        # Noise floor estimation (median-based with sigma clipping)
+        
+        # Add noise floor estimate line
+        # FIX: Use median-based noise estimation instead of crude 10th percentile
+        # The median is more robust to outliers (signals) than percentiles.
+        # For better accuracy, we use iterative sigma-clipping:
+        # 1. Compute median
+        # 2. Compute MAD (median absolute deviation)
+        # 3. Reject samples > median + 3*MAD (likely signals)
+        # 4. Recompute median on remaining samples
         median_val = np.median(mag_cpu)
         mad = np.median(np.abs(mag_cpu - median_val))
-        sigma_estimate = 1.4826 * mad
+        sigma_estimate = 1.4826 * mad  # MAD to standard deviation for Gaussian
         noise_mask = mag_cpu < (median_val + 3 * sigma_estimate)
-        if np.sum(noise_mask) > len(mag_cpu) * 0.1:
+        if np.sum(noise_mask) > len(mag_cpu) * 0.1:  # At least 10% samples are noise
             noise_floor = np.median(mag_cpu[noise_mask])
         else:
-            noise_floor = median_val
-        ax.axhline(y=noise_floor, color=self.colors['secondary'],
-                  linestyle='--', alpha=0.7, linewidth=1.5,
-                  label=f'Noise Floor: {noise_floor:.1f} dB')
-
-        # Find and mark spectral peaks
-        peak_threshold = noise_floor + 10
-        peaks_mask = (mag_cpu > peak_threshold) & (mag_cpu > np.roll(mag_cpu, 1)) & (mag_cpu > np.roll(mag_cpu, -1))
-        peak_indices = np.where(peaks_mask)[0]
-        peak_powers = mag_cpu[peak_indices]
-        sorted_idx = np.argsort(peak_powers)[::-1][:5]  # Top 5 peaks
-
-        spectral_peaks = []
-        spurs_detected = 0
-        for i, idx in enumerate(sorted_idx):
-            peak_idx = peak_indices[idx]
-            freq_khz = freqs[peak_idx]
-            power_db = mag_cpu[peak_idx]
-            spectral_peaks.append((freq_khz, power_db))
-
-            # Mark peak on plot
-            color = self.colors['quaternary'] if i == 0 else '#ff88ff'
-            ax.plot(freq_khz, power_db, 'v', markersize=8, color=color,
-                   markeredgecolor='white', markeredgewidth=0.5)
-            ax.annotate(f'{freq_khz:.1f} kHz\n{power_db:.1f} dB',
-                       (freq_khz, power_db), textcoords="offset points",
-                       xytext=(0, 12), ha='center', fontsize=7, color=color,
-                       bbox=dict(boxstyle='round,pad=0.2', facecolor='black',
-                                alpha=0.7, edgecolor='none'))
-
-        # Bandwidth shading (using annotations or estimate from data)
-        bandwidth_hz = 0
-        center_offset_hz = 0
-        if annotations and annotations.metrics:
-            bandwidth_hz = annotations.metrics.bandwidth_estimate_hz
-            center_offset_hz = annotations.metrics.center_freq_offset_hz
-        else:
-            # Quick bandwidth estimate from spectrum
-            psd_normalized = (mag_cpu - mag_cpu.min()) / (mag_cpu.max() - mag_cpu.min() + 1e-12)
-            cumsum = np.cumsum(psd_normalized) / np.sum(psd_normalized)
-            low_idx = np.searchsorted(cumsum, 0.005)
-            high_idx = np.searchsorted(cumsum, 0.995)
-            bandwidth_hz = (high_idx - low_idx) * (self.config.sample_rate / len(mag_cpu))
-            center_offset_hz = ((low_idx + high_idx) / 2 - len(mag_cpu) / 2) * (self.config.sample_rate / len(mag_cpu))
-
-        if bandwidth_hz > 0:
-            bw_low_khz = (center_offset_hz - bandwidth_hz / 2) / 1e3
-            bw_high_khz = (center_offset_hz + bandwidth_hz / 2) / 1e3
-            ax.axvspan(bw_low_khz, bw_high_khz, alpha=0.15, color=self.colors['tertiary'],
-                      label=f'BW: {bandwidth_hz/1e3:.1f} kHz')
-
-        # DC spike detection and marking
-        center_idx = len(mag_cpu) // 2
-        dc_power = mag_cpu[center_idx]
-        dc_is_spike = dc_power > noise_floor + 15
-        if dc_is_spike:
-            ax.annotate('DC Spike', (0, dc_power), textcoords="offset points",
-                       xytext=(15, 0), ha='left', fontsize=8, color='#ff4444',
-                       arrowprops=dict(arrowstyle='->', color='#ff4444', lw=1.5))
-
-        # Mark spurious signals (peaks outside main bandwidth)
-        if bandwidth_hz > 0 and annotations:
-            for freq, power in annotations.spurious_signals[:3]:
-                freq_khz = freq / 1e3
-                ax.annotate('Spur', (freq_khz, power), textcoords="offset points",
-                           xytext=(10, 5), ha='left', fontsize=7, color='#ff8800',
-                           arrowprops=dict(arrowstyle='->', color='#ff8800', lw=1))
-                spurs_detected += 1
-
+            noise_floor = median_val  # Fall back to simple median
+        ax.axhline(y=noise_floor, color=self.colors['secondary'], 
+                  linestyle='--', alpha=0.7, label=f'Est. Noise Floor: {noise_floor:.1f} dB')
+        
         ax.set_xlabel('Frequency (kHz)', fontsize=11)
         ax.set_ylabel('Magnitude (dB)', fontsize=11)
         header = self._get_plot_header(source_name)
-        ax.set_title(f'Power Spectral Density (Annotated)\n{header}', fontsize=12)
+        ax.set_title(f'Power Spectral Density (Averaged Periodogram)\n{header}', fontsize=12)
         ax.grid(True, alpha=0.3, color=self.colors['grid'])
-        ax.legend(loc='upper right', fontsize=8)
+        ax.legend(loc='upper right')
 
-        # Summary text box
-        summary_lines = [
-            f"Bandwidth: {bandwidth_hz/1e3:.1f} kHz",
-            f"Freq Offset: {center_offset_hz:+.1f} Hz",
-            f"Noise Floor: {noise_floor:.1f} dB",
-            f"Peaks Detected: {len(spectral_peaks)}",
-        ]
-        if dc_is_spike:
-            summary_lines.append(f"DC Spike: {dc_power:.1f} dB")
-        if spurs_detected > 0:
-            summary_lines.append(f"Spurs: {spurs_detected} detected")
-        if annotations and annotations.metrics:
-            summary_lines.append(f"SNR Est: {annotations.metrics.snr_estimate_db:.1f} dB")
-        self._add_summary_textbox(ax, summary_lines, loc='upper left', fontsize=8)
-
-        # Forensic watermark
-        if annotations and annotations.file_hash:
-            self._add_forensic_watermark(fig, annotations.file_hash,
-                                        annotations.analysis_timestamp,
-                                        annotations.analyst_id,
-                                        annotations.chain_verified)
-
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+        plt.tight_layout()
         self._save_figure(fig, filename)
 
     def plot_spectrogram(self, data: cp.ndarray, filename: str = "03_spectrogram.png",
-                         source_name: str = "", annotations: PlotAnnotations = None):
-        """
-        Generate annotated high-resolution spectrogram.
-
-        Annotations include:
-        - Bandwidth boundary lines
-        - Anomaly time markers (dropouts, saturation)
-        - Frequency hopping pattern overlay (if detected)
-        - Summary text box with key findings
-        """
+                         source_name: str = ""):
+        """Generate high-resolution spectrogram."""
         # Limit data size for spectrogram to avoid memory issues
         max_samples = int(self.config.sample_rate * 10)  # 10 seconds max
         data_limited = cp_asnumpy(data[:max_samples])
-        duration_s = len(data_limited) / self.config.sample_rate
-
+        
         nfft = self.config.spectrogram_nfft
         noverlap = int(nfft * self.config.spectrogram_overlap)
-
+        
         fig, ax = plt.subplots(figsize=(14, 8))
-
+        
         Pxx, freqs, bins, im = ax.specgram(
-            data_limited,
-            NFFT=nfft,
+            data_limited, 
+            NFFT=nfft, 
             Fs=self.config.sample_rate,
             noverlap=noverlap,
             cmap='viridis',
             scale='dB',
             mode='psd'
         )
-
-        # Draw bandwidth boundaries if available
-        bandwidth_hz = 0
-        center_offset_hz = 0
-        if annotations and annotations.metrics:
-            bandwidth_hz = annotations.metrics.bandwidth_estimate_hz
-            center_offset_hz = annotations.metrics.center_freq_offset_hz
-
-            if bandwidth_hz > 0:
-                bw_low = center_offset_hz - bandwidth_hz / 2
-                bw_high = center_offset_hz + bandwidth_hz / 2
-                ax.axhline(y=bw_low, color='#00ff88', linestyle='--', linewidth=1.5,
-                          alpha=0.8, label=f'BW: {bandwidth_hz/1e3:.1f} kHz')
-                ax.axhline(y=bw_high, color='#00ff88', linestyle='--', linewidth=1.5, alpha=0.8)
-
-        # Mark anomaly time regions (dropouts)
-        if annotations:
-            for i, (start, end) in enumerate(annotations.dropout_regions[:5]):
-                start_s = start / self.config.sample_rate
-                end_s = end / self.config.sample_rate
-                if start_s < duration_s:
-                    ax.axvspan(start_s, min(end_s, duration_s), alpha=0.3,
-                              color='#ff4444', label='Dropout' if i == 0 else '')
-
-            # Mark saturation regions
-            for i, (start, end) in enumerate(annotations.saturation_regions[:5]):
-                start_s = start / self.config.sample_rate
-                end_s = end / self.config.sample_rate
-                if start_s < duration_s:
-                    ax.axvspan(start_s, min(end_s, duration_s), alpha=0.3,
-                              color='#ff8800', label='Saturation' if i == 0 else '')
-
+        
         ax.set_xlabel('Time (s)', fontsize=11)
         ax.set_ylabel('Frequency (Hz)', fontsize=11)
         header = self._get_plot_header(source_name)
-        ax.set_title(f'Spectrogram (Annotated STFT)\n{header}', fontsize=12)
+        ax.set_title(f'Spectrogram (Short-Time Fourier Transform)\n{header}', fontsize=12)
 
-        cbar = plt.colorbar(im, ax=ax, label='Power/Freq (dB/Hz)')
+        _ = plt.colorbar(im, ax=ax, label='Power/Freq (dB/Hz)')
 
-        # Summary text box
-        summary_lines = [
-            f"Duration: {duration_s:.3f} s",
-            f"FFT Size: {nfft}",
-            f"Overlap: {self.config.spectrogram_overlap*100:.0f}%",
-        ]
-        if bandwidth_hz > 0:
-            summary_lines.append(f"Bandwidth: {bandwidth_hz/1e3:.1f} kHz")
-        if annotations:
-            if len(annotations.dropout_regions) > 0:
-                summary_lines.append(f"Dropouts: {len(annotations.dropout_regions)}")
-            if len(annotations.saturation_regions) > 0:
-                summary_lines.append(f"Saturation: {len(annotations.saturation_regions)}")
-        self._add_summary_textbox(ax, summary_lines, loc='upper right', fontsize=8)
-
-        if len(annotations.dropout_regions) > 0 or len(annotations.saturation_regions) > 0 if annotations else False:
-            ax.legend(loc='lower right', fontsize=8)
-
-        # Forensic watermark
-        if annotations and annotations.file_hash:
-            self._add_forensic_watermark(fig, annotations.file_hash,
-                                        annotations.analysis_timestamp,
-                                        annotations.analyst_id,
-                                        annotations.chain_verified)
-
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+        plt.tight_layout()
         self._save_figure(fig, filename)
 
     def plot_waterfall(self, data: cp.ndarray, filename: str = "04_waterfall.png",
@@ -4573,121 +3955,40 @@ class SignalAnalyzer:
         self._save_figure(fig, filename)
 
     def plot_constellation(self, data: cp.ndarray, filename: str = "05_constellation.png",
-                           source_name: str = "", annotations: PlotAnnotations = None):
-        """
-        Generate annotated constellation diagram with modulation analysis.
-
-        Annotations include:
-        - Ideal constellation points overlay
-        - Detected modulation type
-        - EVM percentage display
-        - Phase error statistics
-        - Color-coded by phase error magnitude
-        - Summary text box with quality metrics
-        """
+                           source_name: str = ""):
+        """Generate constellation diagram with density visualization."""
         n = min(len(data), self.config.constellation_max_points)
         subset = cp_asnumpy(data[:n])
-
-        # Normalize for display
-        max_val = np.max(np.abs(subset))
-        if max_val > 0:
-            subset_norm = subset / max_val
-        else:
-            subset_norm = subset
-
-        i_data = subset_norm.real
-        q_data = subset_norm.imag
-
-        # Get modulation info from annotations or compute
-        modulation = "Unknown"
-        evm_percent = 0.0
-        phase_error_deg = 0.0
-        ideal_points = []
-        snr_from_evm = 0.0
-
-        if annotations:
-            modulation = annotations.detected_modulation
-            evm_percent = annotations.evm_percent
-            phase_error_deg = annotations.phase_error_deg
-            ideal_points = annotations.ideal_constellation_points
-            snr_from_evm = annotations.snr_from_evm_db
-        else:
-            # Quick modulation detection
-            modulation, _, evm_percent, phase_error_deg, ideal_points = self._detect_modulation(subset_norm)
-            if evm_percent > 0:
-                snr_from_evm = -20 * np.log10(evm_percent / 100)
-
+        
+        i_data = subset.real
+        q_data = subset.imag
+        
         fig, axes = plt.subplots(1, 2, figsize=(14, 7))
-
-        # Left plot: Constellation with ideal points overlay
-        # Color-code points by phase error if we have ideal points
-        if ideal_points and len(ideal_points) > 0:
-            # Compute phase error for each point
-            phase_errors = []
-            for sample in subset_norm[::max(1, len(subset_norm)//5000)]:  # Subsample for speed
-                distances = [abs(sample - ip) for ip in ideal_points]
-                min_idx = np.argmin(distances)
-                phase_errors.append(abs(np.angle(sample) - np.angle(ideal_points[min_idx])) * 180 / np.pi)
-
-            # Scatter with color based on phase error magnitude
-            sc = axes[0].scatter(i_data[::max(1, len(i_data)//5000)],
-                                q_data[::max(1, len(q_data)//5000)],
-                                s=2, c=phase_errors, cmap='coolwarm',
-                                alpha=0.5, rasterized=True, vmin=0, vmax=45)
-            plt.colorbar(sc, ax=axes[0], label='Phase Error (deg)', shrink=0.8)
-
-            # Plot ideal constellation points
-            for ip in ideal_points:
-                axes[0].plot(ip.real, ip.imag, 'o', markersize=12,
-                           color=self.colors['quaternary'], markeredgecolor='white',
-                           markeredgewidth=2, alpha=0.9)
-        else:
-            axes[0].scatter(i_data, q_data, s=1, alpha=0.3,
-                           color=self.colors['tertiary'], rasterized=True)
-
+        
+        # Scatter plot
+        axes[0].scatter(i_data, q_data, s=1, alpha=0.3, 
+                       color=self.colors['tertiary'], rasterized=True)
         axes[0].set_xlabel('In-Phase (I)', fontsize=11)
         axes[0].set_ylabel('Quadrature (Q)', fontsize=11)
-        axes[0].set_title(f'Constellation: {modulation}', fontsize=12)
+        axes[0].set_title('Constellation Diagram', fontsize=12)
         axes[0].grid(True, alpha=0.3, color=self.colors['grid'])
         axes[0].axis('equal')
         axes[0].axhline(y=0, color='gray', linewidth=0.5)
         axes[0].axvline(x=0, color='gray', linewidth=0.5)
-        axes[0].set_xlim(-1.5, 1.5)
-        axes[0].set_ylim(-1.5, 1.5)
-
-        # Right plot: 2D Histogram (density)
+        
+        # 2D Histogram (density)
         h, xedges, yedges = np.histogram2d(i_data, q_data, bins=256)
         im = axes[1].imshow(h.T, origin='lower', aspect='equal',
                            extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
-                           cmap='hot', norm=LogNorm(vmin=1, vmax=max(h.max(), 1)))
+                           cmap='hot', norm=LogNorm(vmin=1, vmax=h.max()))
         axes[1].set_xlabel('In-Phase (I)', fontsize=11)
         axes[1].set_ylabel('Quadrature (Q)', fontsize=11)
         axes[1].set_title('Constellation Density', fontsize=12)
         plt.colorbar(im, ax=axes[1], label='Sample Count')
 
-        # Summary text box with modulation quality metrics
-        summary_lines = [
-            f"Modulation: {modulation}",
-            f"EVM: {evm_percent:.1f}%",
-            f"Phase Error: {phase_error_deg:.1f} deg RMS",
-        ]
-        if snr_from_evm > 0:
-            summary_lines.append(f"SNR (from EVM): {snr_from_evm:.1f} dB")
-        if annotations and annotations.metrics:
-            summary_lines.append(f"I/Q Imbalance: {annotations.metrics.iq_imbalance_db:.2f} dB")
-        self._add_summary_textbox(axes[0], summary_lines, loc='upper left', fontsize=8)
-
         header = self._get_plot_header(source_name)
-        fig.suptitle(f'I/Q Constellation Analysis ({n:,} samples)\n{header}', fontsize=12)
-
-        # Forensic watermark
-        if annotations and annotations.file_hash:
-            self._add_forensic_watermark(fig, annotations.file_hash,
-                                        annotations.analysis_timestamp,
-                                        annotations.analyst_id,
-                                        annotations.chain_verified)
-
-        plt.tight_layout(rect=[0, 0.03, 1, 0.97])
+        fig.suptitle(f'I/Q Constellation ({n:,} samples)\n{header}', fontsize=12)
+        plt.tight_layout()
         self._save_figure(fig, filename)
 
     def plot_phase_analysis(self, data: cp.ndarray, filename: str = "06_phase.png",
@@ -5943,54 +5244,30 @@ class SignalAnalyzer:
         })
         
         metrics = self.compute_metrics(data)
-
+        
         # FORENSIC: Checkpoint after metrics computation
         forensic_pipeline.add_hash_checkpoint(data, "post_metrics", {
             'avg_power_dbm': metrics.avg_power_dbm,
             'snr_estimate_db': metrics.snr_estimate_db
         })
         self._print_metrics(metrics, name)
-
-        # Anomaly detection (moved before plotting to provide annotations)
-        anomalies = self.detect_anomalies(data)
-
-        # Compute file hash for forensic watermark
-        file_hash = ""
-        if filepath and filepath.exists():
-            try:
-                forensic_hashes = compute_forensic_hashes(filepath)
-                file_hash = forensic_hashes.get('sha256', '')
-            except Exception as e:
-                log.debug(f"Could not compute file hash for watermark: {e}")
-
-        # Compute comprehensive plot annotations
-        log.info("Computing plot annotations...")
-        annotations = self._compute_plot_annotations(data, metrics, anomalies)
-        annotations.metrics = metrics
-        annotations.anomalies = anomalies
-        annotations.file_hash = file_hash
-        annotations.analysis_timestamp = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-        annotations.analyst_id = "RFChain-v2.2.3"
-        annotations.chain_verified = True
-
-        # Run all plot functions with source metadata and annotations
+        
+        # Run all plot functions with source metadata
         src = filepath.name if filepath else name
-        log.info("Generating annotated plots...")
-
-        # Annotated plots (time, freq, spectrogram, constellation)
-        self.plot_time_domain(data, f"{name}_01_time_domain.png", src, annotations=annotations)
-        self.plot_frequency_domain(data, f"{name}_02_frequency_domain.png", source_name=src, annotations=annotations)
-        self.plot_spectrogram(data, f"{name}_03_spectrogram.png", src, annotations=annotations)
+        self.plot_time_domain(data, f"{name}_01_time_domain.png", src)
+        self.plot_frequency_domain(data, f"{name}_02_frequency_domain.png", source_name=src)
+        self.plot_spectrogram(data, f"{name}_03_spectrogram.png", src)
         self.plot_waterfall(data, f"{name}_04_waterfall.png", src)
-        self.plot_constellation(data, f"{name}_05_constellation.png", src, annotations=annotations)
+        self.plot_constellation(data, f"{name}_05_constellation.png", src)
         self.plot_phase_analysis(data, f"{name}_06_phase.png", src)
         self.plot_autocorrelation(data, f"{name}_07_autocorrelation.png", src)
         self.plot_cyclostationary(data, f"{name}_08_cyclostationary.png", src)
         self.plot_statistics(data, f"{name}_09_statistics.png", src)
         self.plot_power_analysis(data, f"{name}_10_power_analysis.png", src)
         self.plot_eye_diagram(data, filename=f"{name}_11_eye_diagram.png", source_name=src)
-
-        # Log annotation summary
+        
+        # Anomaly detection
+        anomalies = self.detect_anomalies(data)
         if any(anomalies[k] for k in ['dc_spike', 'saturation', 'dropout']):
             log.warning(f"Anomalies detected: {anomalies['details']}")
         
@@ -5999,18 +5276,14 @@ class SignalAnalyzer:
             'anomalies_found': any(anomalies[k] for k in ['dc_spike', 'saturation', 'dropout'])
         })
         
-        # Collect file metadata (reuse hash computed earlier for annotations)
+        # Collect file metadata
         file_metadata = {}
-        forensic_hashes_full = {}
         if filepath and filepath.exists():
             stat = filepath.stat()
-            # Use cached hash if available, otherwise compute
-            if not file_hash:
-                forensic_hashes_full = compute_forensic_hashes(filepath)
-                file_hash = forensic_hashes_full.get('sha256', '')
-            else:
-                # Get full hashes for metadata
-                forensic_hashes_full = compute_forensic_hashes(filepath)
+            # Compute SHA-256 hash with chunked reading for large files
+            # FORENSIC FIX: Dual-algorithm hashing per SWGDE
+            forensic_hashes = compute_forensic_hashes(filepath)
+            file_hash = forensic_hashes['sha256']
             file_metadata = {
                 'source_file': str(filepath.absolute()),
                 'filename': filepath.name,
@@ -6019,8 +5292,8 @@ class SignalAnalyzer:
                 'file_modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
                 'file_created': datetime.fromtimestamp(stat.st_ctime).isoformat(),
                 'file_sha256': file_hash,
-                'file_sha3_256': forensic_hashes_full.get('sha3_256', ''),
-                'hash_timestamp_utc': forensic_hashes_full.get('hash_timestamp_utc', ''),
+                'file_sha3_256': forensic_hashes.get('sha3_256', ''),
+                'hash_timestamp_utc': forensic_hashes.get('hash_timestamp_utc', ''),
             }
 
         # Digital signal analysis (if enabled)
@@ -6069,9 +5342,49 @@ class SignalAnalyzer:
             'analysis_complete': True
         })
         
+        # RAG CONTEXT: Query historical signals for contextual insights
+        rag_context = {}
+        try:
+            from rag_context_engine import RAGContextEngine
+            rag_engine = RAGContextEngine()
+            
+            # Build metrics dict for RAG query
+            rag_query_metrics = {
+                'avg_power_dbm': metrics.avg_power_dbm,
+                'peak_power_dbm': metrics.peak_power_dbm,
+                'papr_db': metrics.papr_db,
+                'snr_estimate_db': metrics.snr_estimate_db,
+                'bandwidth_estimate_hz': metrics.bandwidth_estimate_hz,
+                'iq_imbalance_db': metrics.iq_imbalance_db,
+                'anomalies': anomalies,
+            }
+            
+            # Add modulation info if available from digital analysis
+            if digital_results:
+                rag_query_metrics['modulation_type'] = digital_results.modulation_type or 'unknown'
+                rag_query_metrics['symbol_rate'] = getattr(digital_results, 'symbol_rate', 0)
+            
+            # Add OFDM info if available from v3 analysis
+            if v3_metrics and 'fft_debug' in v3_metrics:
+                fft_info = v3_metrics['fft_debug']
+                if fft_info.get('ofdm_detected'):
+                    rag_query_metrics['ofdm_fft_size'] = fft_info.get('ofdm_fft_size', 0)
+            
+            # Get RAG context
+            context = rag_engine.get_context(rag_query_metrics)
+            rag_context = context.to_dict()
+            
+            log.info(f"RAG context: {len(context.similar_signals)} similar signals, "
+                    f"{len(context.pattern_matches)} pattern matches, "
+                    f"{len(context.recommendations)} recommendations")
+        except ImportError:
+            log.debug("RAG context engine not available")
+        except Exception as e:
+            log.warning(f"RAG context query failed: {e}")
+        
         output_data = {
             'analysis_timestamp': datetime.now().isoformat(),
-            'analyzer_version': '2.2.3-annotated',
+            'analyzer_version': '2.2.2-forensic',
             'file_metadata': file_metadata,
             'residual_metadata': residual_metadata or {'residual_bytes': 0},
             'forensic_pipeline': forensic_pipeline.to_dict(),  # FORENSIC: Include hash chain
@@ -6086,7 +5399,7 @@ class SignalAnalyzer:
             },
             'metrics': metrics.to_dict(),
             'anomalies': anomalies,
-            'plot_annotations': annotations.to_dict(),  # NEW: Include plot annotation data
+            'rag_context': rag_context,  # RAG: Historical context and recommendations
         }
 
         if digital_results:
