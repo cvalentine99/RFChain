@@ -1,0 +1,297 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* Jarvis HUD Theme - Dark with Cyan/Blue Accents */
+:root {
+  --radius: 0.5rem;
+  
+  /* Core colors - Jarvis dark theme */
+  --background: oklch(0.08 0.02 240);
+  --foreground: oklch(0.95 0.02 200);
+  
+  /* Cyan accent - primary Jarvis color */
+  --primary: oklch(0.75 0.18 195);
+  --primary-foreground: oklch(0.1 0.02 195);
+  
+  /* Blue secondary accent */
+  --secondary: oklch(0.25 0.08 240);
+  --secondary-foreground: oklch(0.9 0.05 200);
+  
+  /* Muted elements */
+  --muted: oklch(0.15 0.03 240);
+  --muted-foreground: oklch(0.65 0.05 200);
+  
+  /* Accent - glowing cyan */
+  --accent: oklch(0.65 0.2 195);
+  --accent-foreground: oklch(0.1 0.02 195);
+  
+  /* Cards and panels */
+  --card: oklch(0.12 0.025 240);
+  --card-foreground: oklch(0.92 0.02 200);
+  
+  /* Popover */
+  --popover: oklch(0.1 0.025 240);
+  --popover-foreground: oklch(0.92 0.02 200);
+  
+  /* Borders - subtle cyan glow */
+  --border: oklch(0.3 0.1 195);
+  --input: oklch(0.2 0.05 240);
+  --ring: oklch(0.7 0.18 195);
+  
+  /* Destructive */
+  --destructive: oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(0.98 0.01 0);
+  
+  /* Chart colors - Jarvis palette */
+  --chart-1: oklch(0.75 0.18 195);
+  --chart-2: oklch(0.65 0.15 220);
+  --chart-3: oklch(0.55 0.12 180);
+  --chart-4: oklch(0.7 0.2 160);
+  --chart-5: oklch(0.6 0.18 200);
+  
+  /* Sidebar */
+  --sidebar: oklch(0.1 0.025 240);
+  --sidebar-foreground: oklch(0.9 0.02 200);
+  --sidebar-primary: oklch(0.75 0.18 195);
+  --sidebar-primary-foreground: oklch(0.1 0.02 195);
+  --sidebar-accent: oklch(0.2 0.08 240);
+  --sidebar-accent-foreground: oklch(0.9 0.02 200);
+  --sidebar-border: oklch(0.25 0.08 195);
+  --sidebar-ring: oklch(0.7 0.18 195);
+  
+  /* Jarvis-specific custom properties */
+  --jarvis-glow: oklch(0.75 0.2 195);
+  --jarvis-glow-dim: oklch(0.5 0.15 195);
+  --jarvis-panel-bg: oklch(0.08 0.03 240 / 0.9);
+  --jarvis-border-glow: 0 0 10px oklch(0.6 0.18 195 / 0.5);
+  --jarvis-text-glow: 0 0 8px oklch(0.75 0.2 195 / 0.6);
+}
+
+/* Dark mode inherits from root since we're always dark */
+.dark {
+  /* Same as root - Jarvis is always dark */
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "Rajdhani", ui-sans-serif, system-ui, sans-serif;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Orbitron", ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: 0.05em;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  [type="reset"]:not(:disabled),
+  a[href],
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    @apply cursor-pointer;
+  }
+}
+
+@layer components {
+  /**
+   * Custom container utility that centers content and adds responsive padding.
+   *
+   * This overrides Tailwind's default container behavior to:
+   * - Auto-center content (mx-auto)
+   * - Add responsive horizontal padding
+   * - Set max-width for large screens
+   *
+   * Usage: <div className="container">...</div>
+   *
+   * For custom widths, use max-w-* utilities directly:
+   * <div className="max-w-6xl mx-auto px-4">...</div>
+   */
+  .container {
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem; /* 16px - mobile padding */
+    padding-right: 1rem;
+  }
+
+  .flex {
+    min-height: 0;
+    min-width: 0;
+  }
+
+  @media (min-width: 640px) {
+    .container {
+      padding-left: 1.5rem; /* 24px - tablet padding */
+      padding-right: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container {
+      padding-left: 2rem;
+      padding-right: 2rem;
+      max-width: 1400px;
+    }
+  }
+}
+
+/* Jarvis HUD Utility Classes */
+@layer utilities {
+  .jarvis-text {
+    color: var(--jarvis-glow);
+    text-shadow: var(--jarvis-text-glow);
+  }
+  
+  .jarvis-panel {
+    background: var(--jarvis-panel-bg);
+    border: 1px solid var(--border);
+    box-shadow: var(--jarvis-border-glow), inset 0 0 20px oklch(0.5 0.15 195 / 0.1);
+    backdrop-filter: blur(10px);
+  }
+  
+  .jarvis-glow-pulse {
+    animation: glow-pulse 2s ease-in-out infinite;
+  }
+  
+  .jarvis-scan-line {
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .jarvis-scan-line::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--jarvis-glow), transparent);
+    animation: scan-line 3s linear infinite;
+  }
+  
+  .jarvis-corners {
+    position: relative;
+  }
+  
+  .jarvis-corners::before,
+  .jarvis-corners::after {
+    content: "";
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-color: var(--jarvis-glow);
+    border-style: solid;
+  }
+  
+  .jarvis-corners::before {
+    top: 0;
+    left: 0;
+    border-width: 2px 0 0 2px;
+  }
+  
+  .jarvis-corners::after {
+    bottom: 0;
+    right: 0;
+    border-width: 0 2px 2px 0;
+  }
+  
+  .jarvis-hologram {
+    background: linear-gradient(
+      135deg,
+      oklch(0.12 0.03 240) 0%,
+      oklch(0.15 0.05 200) 50%,
+      oklch(0.12 0.03 240) 100%
+    );
+    background-size: 200% 200%;
+    animation: hologram-shift 4s ease infinite;
+  }
+  
+  .jarvis-hex-grid {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%2300d4ff' fill-opacity='0.03'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  }
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow: var(--jarvis-border-glow);
+  }
+  50% {
+    box-shadow: 0 0 20px oklch(0.7 0.2 195 / 0.7), 0 0 40px oklch(0.6 0.18 195 / 0.3);
+  }
+}
+
+@keyframes scan-line {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+@keyframes hologram-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: oklch(0.1 0.02 240);
+}
+
+::-webkit-scrollbar-thumb {
+  background: oklch(0.3 0.1 195);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.5 0.15 195);
+}

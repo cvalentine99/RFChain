@@ -1,0 +1,58 @@
+name: rfchain-hud
+channels:
+  - conda-forge
+  - nvidia
+  - defaults
+dependencies:
+  # Python version
+  - python=3.12
+  
+  # =============================================================================
+  # GPU ACCELERATION (NVIDIA CUDA for RTX 4090)
+  # =============================================================================
+  # CuPy with CUDA 12.x support (RTX 4090 requires CUDA 12+)
+  - cupy-cuda12x>=13.0.0
+  
+  # CUDA Toolkit (runtime libraries)
+  - cuda-toolkit>=12.0
+  
+  # cuDNN for deep learning operations (optional, for future ML features)
+  - cudnn>=8.9
+  
+  # =============================================================================
+  # CORE SCIENTIFIC COMPUTING
+  # =============================================================================
+  - numpy>=1.26.0
+  - scipy>=1.11.0
+  - matplotlib>=3.8.0
+  
+  # Signal processing and machine learning
+  - scikit-learn>=1.3.0
+  
+  # Data handling
+  - pandas>=2.1.0
+  
+  # Image processing
+  - pillow>=10.0.0
+  
+  # =============================================================================
+  # PIP DEPENDENCIES (not available in conda)
+  # =============================================================================
+  - pip
+  - pip:
+    # Additional signal processing
+    - commpy>=0.8.0
+    
+    # PDF generation for forensic reports
+    - reportlab>=4.0.0
+    - fpdf2>=2.7.0
+
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
+# These will be set when the environment is activated
+variables:
+  # Enable CuPy memory pool for better GPU memory management
+  CUPY_ACCELERATORS: cub,cutensor
+  # Set CUDA visible devices (use GPU 0 by default)
+  CUDA_VISIBLE_DEVICES: "0"
