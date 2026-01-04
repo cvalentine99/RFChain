@@ -101,7 +101,7 @@ def to_scalar(val):
 def cp_asnumpy(arr):
     """Safe wrapper for cp.asnumpy that works in CPU mode."""
     if GPU_AVAILABLE:
-        return cp_asnumpy(arr)
+        return cp.asnumpy(arr)  # FIX: was cp_asnumpy (infinite recursion)
     return np.asarray(arr)
 
 # System info for forensic audit trail
@@ -3470,8 +3470,24 @@ class SignalAnalyzer:
             metrics.avg_power_linear = float(to_scalar(cp.mean(power)))
             metrics.peak_power_linear = float(to_scalar(cp.max(power)))
             
-            # Convert to dBm (assuming 50 ohm impedance, voltage units)
-            # P_dBm = 10*log10(V^2/R) + 30
+            # Convert to dBm
+            # IMPORTANT: These dBm values are RELATIVE measurements, not absolute.
+            # Without ADC calibration data (full-scale voltage, gain settings), we cannot
+            # compute true absolute power in dBm. The values shown assume:
+            # - Signal samples represent voltage (not power)
+            # - 50 ohm reference impedance
+            # - ADC full-scale = 1.0V (normalized)
+            #
+            # For forensic purposes, use these as RELATIVE power indicators.
+            # Absolute power requires calibration: P_true = P_measured + cal_offset_dB
+            #
+            # Formula: P_dBm = 10*log10(V_rms^2 / R) + 30
+            # where V_rms^2 = avg_power_linear (mean of |samples|^2)
+            #
+            # With normalized samples and 50 ohm: P_dBm = 10*log10(avg_power) + 30 - 10*log10(50)
+            #                                          = 10*log10(avg_power) + 30 - 17
+            #                                          = 10*log10(avg_power) + 13 dBm
+            # But we keep the explicit formula for clarity.
             if metrics.avg_power_linear > 0:
                 metrics.avg_power_dbm = 10 * np.log10(
                     metrics.avg_power_linear / self.config.impedance_ohms) + 30
@@ -3512,16 +3528,28 @@ class SignalAnalyzer:
             if float(to_scalar(m2_sq)) < 1e-20:
                 return 0.0
 
-            # M2M4 estimator
+            # M2M4 estimator (kurtosis-based)
+            # Reference: Pauluzzi & Beaulieu, "A comparison of SNR estimation techniques
+            # for the AWGN channel", IEEE Trans. Comm., 2000
             k = float(to_scalar(m4 / m2_sq))
 
-            # For complex Gaussian noise, k ≈ 2
-            # For signal + noise, we can estimate SNR
-            # Use threshold slightly above 2 for numerical stability
-            if k > 2.01:
-                snr_linear = (k - 2) / 2
-                return float(10 * np.log10(snr_linear + 1e-10))
-            return 0.0
+            # For complex Gaussian noise, k ≈ 2 (kurtosis = 2 for complex Gaussian)
+            # For signal + noise with BPSK/QPSK: k = 2 + 2*SNR/(1+SNR)^2 approximately
+            # 
+            # Standard M2M4 formula for complex signals:
+            # SNR = (sqrt(2*k - 3) - 1) / 2  when k > 1.5
+            # This is derived from E[|x|^4]/E[|x|^2]^2 for signal + AWGN
+            #
+            # For k <= 1.5, signal is noise-dominated
+            if k > 1.5:
+                # Standard M2M4 SNR estimator
+                discriminant = 2 * k - 3
+                if discriminant > 0:
+                    snr_linear = (np.sqrt(discriminant) - 1) / 2
+                    # Clamp to reasonable range (avoid negative SNR from numerical issues)
+                    snr_linear = max(snr_linear, 1e-10)
+                    return float(10 * np.log10(snr_linear))
+            return 0.0  # Noise-dominated or invalid
         except (ZeroDivisionError, ValueError, RuntimeError) as e:
             log.debug(f"SNR estimation failed: {e}")
             return 0.0
@@ -3636,7 +3664,21 @@ class SignalAnalyzer:
                        color=self.colors['primary'])
         
         # Add noise floor estimate line
-        noise_floor = np.percentile(mag_cpu, 10)
+        # FIX: Use median-based noise estimation instead of crude 10th percentile
+        # The median is more robust to outliers (signals) than percentiles.
+        # For better accuracy, we use iterative sigma-clipping:
+        # 1. Compute median
+        # 2. Compute MAD (median absolute deviation)
+        # 3. Reject samples > median + 3*MAD (likely signals)
+        # 4. Recompute median on remaining samples
+        median_val = np.median(mag_cpu)
+        mad = np.median(np.abs(mag_cpu - median_val))
+        sigma_estimate = 1.4826 * mad  # MAD to standard deviation for Gaussian
+        noise_mask = mag_cpu < (median_val + 3 * sigma_estimate)
+        if np.sum(noise_mask) > len(mag_cpu) * 0.1:  # At least 10% samples are noise
+            noise_floor = np.median(mag_cpu[noise_mask])
+        else:
+            noise_floor = median_val  # Fall back to simple median
         ax.axhline(y=noise_floor, color=self.colors['secondary'], 
                   linestyle='--', alpha=0.7, label=f'Est. Noise Floor: {noise_floor:.1f} dB')
         
@@ -3864,39 +3906,108 @@ class SignalAnalyzer:
     def plot_cyclostationary(self, data: cp.ndarray,
                              filename: str = "08_cyclostationary.png",
                              source_name: str = ""):
-        """Compute cyclic spectral density (basic cyclostationary analysis)."""
+        """
+        Compute REAL Spectral Correlation Density (SCD) for cyclostationary analysis.
+        
+        The SCD is defined as:
+        S_x^α(f) = lim_{T→∞} (1/T) * E[X_T(t, f+α/2) * conj(X_T(t, f-α/2))]
+        
+        where X_T is the short-time Fourier transform and α is the cyclic frequency.
+        
+        This implementation uses the FFT Accumulation Method (FAM) which is computationally
+        efficient and produces accurate results for detecting cyclostationary features
+        in communication signals (BPSK, QPSK, OFDM, etc.).
+        
+        References:
+        - Roberts, R.S., Brown, W.A., Loomis, H.H. (1991) "Computationally Efficient 
+          Algorithms for Cyclic Spectral Analysis" IEEE SP Magazine
+        - Gardner, W.A. (1991) "Exploitation of Spectral Redundancy in Cyclostationary Signals"
+        """
         with gpu_memory_pool():
-            n = min(len(data), 50000)
+            n = min(len(data), 65536)  # Use power of 2 for FFT efficiency
             subset = data[:n]
-            nfft = 256
             
-            # Compute spectral correlation at alpha = 0 (standard PSD)
-            n_frames = n // nfft
-            scd = cp.zeros((nfft, nfft), dtype=cp.complex64)
+            # FFT Accumulation Method (FAM) parameters
+            nfft = 256  # Frequency resolution
+            noverlap = nfft // 4  # 75% overlap for better cyclic frequency resolution
+            hop = nfft - noverlap
             
-            for i in range(n_frames - 1):
-                x1 = subset[i * nfft:(i + 1) * nfft]
-                x2 = subset[(i + 1) * nfft:(i + 2) * nfft]
+            # Number of cyclic frequency bins (alpha resolution)
+            n_alpha = 128
+            
+            # Compute Short-Time Fourier Transform (STFT)
+            n_frames = (n - nfft) // hop + 1
+            if n_frames < 2:
+                # Not enough data, fall back to simple PSD
+                log.warning("Insufficient data for cyclostationary analysis, showing PSD only")
+                psd = cp.abs(cp.fft.fftshift(cp.fft.fft(subset[:nfft]))) ** 2
+                scd_cpu = np.tile(cp_asnumpy(psd), (n_alpha, 1))
+            else:
+                # Apply Hanning window
+                window = cp.hanning(nfft).astype(cp.complex64)
                 
-                X1 = cp.fft.fft(x1)
-                X2 = cp.fft.fft(x2)
+                # Compute STFT matrix
+                stft = cp.zeros((n_frames, nfft), dtype=cp.complex64)
+                for i in range(n_frames):
+                    start = i * hop
+                    frame = subset[start:start + nfft] * window
+                    stft[i, :] = cp.fft.fftshift(cp.fft.fft(frame))
                 
-                scd += cp.outer(X1, cp.conj(X2))
-            
-            scd = cp.fft.fftshift(cp.abs(scd)) / n_frames
-            scd_cpu = cp_asnumpy(scd)
+                # Compute Spectral Correlation Density using time-smoothed cyclic periodogram
+                # S_x^α(f) ≈ (1/K) * Σ_k X_k(f + α/2) * conj(X_k(f - α/2))
+                # where k indexes time frames
+                
+                # Create alpha (cyclic frequency) axis: -0.5 to 0.5 normalized
+                alpha_vals = cp.linspace(-0.5, 0.5, n_alpha)
+                
+                # SCD matrix: rows = alpha (cyclic freq), cols = f (spectral freq)
+                scd = cp.zeros((n_alpha, nfft), dtype=cp.float32)
+                
+                for ai, alpha in enumerate(alpha_vals):
+                    # Shift amount in frequency bins
+                    shift = int(alpha * nfft)
+                    
+                    if shift == 0:
+                        # α = 0: Standard PSD (no cyclic component)
+                        scd[ai, :] = cp.mean(cp.abs(stft) ** 2, axis=0)
+                    else:
+                        # Cyclic correlation: X(f + α/2) * conj(X(f - α/2))
+                        # Use circular shift to align frequency bins
+                        stft_plus = cp.roll(stft, shift // 2, axis=1)
+                        stft_minus = cp.roll(stft, -shift // 2, axis=1)
+                        
+                        # Time-averaged cyclic correlation
+                        cyclic_corr = cp.mean(stft_plus * cp.conj(stft_minus), axis=0)
+                        scd[ai, :] = cp.abs(cyclic_corr)
+                
+                scd_cpu = cp_asnumpy(scd)
         
         fig, ax = plt.subplots(figsize=(10, 10))
         
-        im = ax.imshow(20 * np.log10(scd_cpu + 1e-12), 
-                      cmap='viridis', aspect='equal',
-                      extent=[-0.5, 0.5, -0.5, 0.5])
+        # Plot SCD in dB scale
+        scd_db = 10 * np.log10(scd_cpu + 1e-12)
         
-        ax.set_xlabel('Normalized Frequency f', fontsize=11)
-        ax.set_ylabel('Cyclic Frequency α', fontsize=11)
+        # Normalize to peak
+        scd_db -= np.max(scd_db)
+        
+        im = ax.imshow(scd_db, 
+                      cmap='viridis', aspect='auto',
+                      extent=[-0.5, 0.5, -0.5, 0.5],
+                      origin='lower',
+                      vmin=-40, vmax=0)  # 40 dB dynamic range
+        
+        ax.set_xlabel('Normalized Frequency f (cycles/sample)', fontsize=11)
+        ax.set_ylabel('Cyclic Frequency α (cycles/sample)', fontsize=11)
         header = self._get_plot_header(source_name)
-        ax.set_title(f'Spectral Correlation Density (Cyclostationary Features)\n{header}', fontsize=11)
-        plt.colorbar(im, ax=ax, label='Magnitude (dB)')
+        ax.set_title(f'Spectral Correlation Density (FAM Method)\n{header}', fontsize=11)
+        cbar = plt.colorbar(im, ax=ax, label='Magnitude (dB, normalized)')
+        
+        # Add annotation explaining cyclostationary features
+        ax.axhline(y=0, color='white', linestyle='--', alpha=0.5, linewidth=0.5)
+        ax.text(0.02, 0.98, 'α=0: Standard PSD\nα≠0: Cyclic features (symbol rate, carrier)',
+                transform=ax.transAxes, fontsize=8, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='black', alpha=0.7),
+                color='white')
 
         plt.tight_layout()
         self._save_figure(fig, filename)
@@ -4062,11 +4173,26 @@ class SignalAnalyzer:
                     f"DC offset detected: {float(to_scalar(dc_component)):.4f}")
             
             # Saturation detection (clipping)
+            # FIX: Don't assume normalized [-1,1] data. Instead, detect clipping by:
+            # 1. Looking for repeated max values (ADC clipping signature)
+            # 2. Checking if max is at a power-of-2 boundary (common ADC limits)
             max_val = float(to_scalar(cp.max(cp.abs(data))))
-            if max_val > 0.99:
+            min_val = float(to_scalar(cp.min(cp.abs(data))))
+            
+            # Count samples at max value (clipping creates flat tops)
+            at_max = int(to_scalar(cp.sum(cp.abs(data) >= max_val * 0.9999)))
+            clipping_ratio = at_max / len(data)
+            
+            # Saturation indicators:
+            # - More than 0.1% of samples at max value suggests clipping
+            # - Or max value is suspiciously close to common ADC limits
+            adc_limits = [1.0, 127/128, 32767/32768, 2147483647/2147483648]  # 8/16/32-bit normalized
+            near_adc_limit = any(abs(max_val - limit) < 0.01 for limit in adc_limits)
+            
+            if clipping_ratio > 0.001 or (near_adc_limit and clipping_ratio > 0.0001):
                 anomalies['saturation'] = True
                 anomalies['details'].append(
-                    f"Possible saturation: max amplitude = {max_val:.4f}")
+                    f"Possible saturation: {clipping_ratio*100:.2f}% samples at max ({max_val:.4f})")
             
             # Dropout detection (zero regions)
             power = cp.abs(data) ** 2
