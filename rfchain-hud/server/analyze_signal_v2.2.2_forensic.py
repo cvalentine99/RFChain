@@ -71,6 +71,8 @@ if not log.handlers:
 HASH_CHUNK_SIZE = 65536  # Chunk size for file hashing (64KB)
 
 # Issue 11 Fix: Named constants for magic numbers (forensic thresholds)
+EPSILON = 1e-10  # Small value to prevent division by zero
+EPSILON_SMALL = 1e-12  # Even smaller epsilon for high-precision calculations
 DC_SPIKE_THRESHOLD = 0.1  # DC component threshold relative to RMS
 AUTOCORR_PEAK_HEIGHT = 0.5  # Autocorrelation peak detection height
 AUTOCORR_PEAK_DISTANCE = 10  # Minimum distance between autocorr peaks
