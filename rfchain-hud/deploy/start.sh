@@ -143,10 +143,15 @@ echo -e "${CYAN}Access the application at: ${GREEN}http://localhost:$PORT${NC}"
 echo -e "${CYAN}Press Ctrl+C to stop the server${NC}"
 echo ""
 
-# Start server directly with tsx (dev mode - more reliable)
+# Build and start production server
 cd "$PROJECT_DIR"
+echo -e "${CYAN}[6/6] Building application...${NC}"
 if command -v pnpm &> /dev/null; then
-    PORT=$PORT pnpm dev
+    pnpm build
 else
-    PORT=$PORT npm run dev
+    npm run build
 fi
+
+# Start production server
+echo -e "${GREEN}Starting production server...${NC}"
+PORT=$PORT node dist/index.js
