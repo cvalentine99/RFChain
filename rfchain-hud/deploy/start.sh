@@ -46,16 +46,29 @@ mkdir -p "$PROJECT_DIR/audio_uploads"
 mkdir -p "$PROJECT_DIR/data"
 mkdir -p "$LOG_DIR"
 
-# Check for .env.local
+# Check for .env.local - try multiple sources
 if [ ! -f "$PROJECT_DIR/.env.local" ]; then
     echo -e "${YELLOW}[WARNING] .env.local not found. Creating from template...${NC}"
-    if [ -f "$PROJECT_DIR/deploy/.env.local.template" ]; then
+    if [ -f "$PROJECT_DIR/deploy/.env.local.example" ]; then
+        cp "$PROJECT_DIR/deploy/.env.local.example" "$PROJECT_DIR/.env.local"
+        echo -e "${GREEN}✓ Created .env.local from .env.local.example${NC}"
+    elif [ -f "$PROJECT_DIR/deploy/.env.local.template" ]; then
         cp "$PROJECT_DIR/deploy/.env.local.template" "$PROJECT_DIR/.env.local"
-        echo -e "${YELLOW}Please edit .env.local with your configuration before running again.${NC}"
-        exit 1
+        echo -e "${GREEN}✓ Created .env.local from .env.local.template${NC}"
     else
-        echo -e "${RED}[ERROR] Template file not found. Please create .env.local manually.${NC}"
-        exit 1
+        # Create a minimal .env.local
+        echo -e "${YELLOW}[INFO] Creating minimal .env.local...${NC}"
+        cat > "$PROJECT_DIR/.env.local" << 'EOF'
+DATABASE_URL="file:./data/rfchain.db"
+PORT=3007
+NODE_ENV=production
+HOST=0.0.0.0
+JWT_SECRET="change-this-to-a-secure-random-string"
+GPU_ENABLED=true
+CUDA_VISIBLE_DEVICES=0
+EOF
+        echo -e "${GREEN}✓ Created minimal .env.local${NC}"
+        echo -e "${YELLOW}[NOTE] Edit .env.local to customize settings${NC}"
     fi
 fi
 
@@ -72,21 +85,30 @@ else
     elif [ -f "/opt/conda/etc/profile.d/conda.sh" ]; then
         source "/opt/conda/etc/profile.d/conda.sh"
     else
-        echo -e "${RED}[ERROR] Conda not found. Please install Miniconda or Anaconda.${NC}"
-        exit 1
+        echo -e "${YELLOW}[WARNING] Conda not found. Skipping Python environment setup.${NC}"
+        echo -e "${YELLOW}GPU acceleration may not be available.${NC}"
     fi
 fi
 
-# Check if conda environment exists
-if ! conda env list | grep -q "^$CONDA_ENV_NAME "; then
-    echo -e "${YELLOW}[INFO] Creating conda environment '$CONDA_ENV_NAME'...${NC}"
-    conda env create -f "$PROJECT_DIR/deploy/environment.yml"
+# Check if conda environment exists (only if conda is available)
+if command -v conda &> /dev/null; then
+    if ! conda env list | grep -q "^$CONDA_ENV_NAME "; then
+        echo -e "${YELLOW}[INFO] Creating conda environment '$CONDA_ENV_NAME'...${NC}"
+        conda env create -f "$PROJECT_DIR/deploy/environment.yml" || {
+            echo -e "${YELLOW}[WARNING] Conda env creation failed. Continuing without GPU support.${NC}"
+        }
+    fi
+    
+    # Activate conda environment
+    echo -e "${CYAN}[3/6] Activating conda environment...${NC}"
+    conda activate "$CONDA_ENV_NAME" 2>/dev/null || {
+        echo -e "${YELLOW}[WARNING] Could not activate conda env. Using system Python.${NC}"
+    }
 fi
 
-# Activate conda environment
-echo -e "${CYAN}[3/6] Activating conda environment...${NC}"
-conda activate "$CONDA_ENV_NAME"
-echo -e "${GREEN}✓ Python: $(python --version)${NC}"
+if command -v python &> /dev/null; then
+    echo -e "${GREEN}✓ Python: $(python --version 2>&1)${NC}"
+fi
 
 # Check Node.js
 echo -e "${CYAN}[4/6] Checking Node.js...${NC}"
@@ -100,12 +122,20 @@ echo -e "${GREEN}✓ Node.js: $(node --version)${NC}"
 echo -e "${CYAN}[5/6] Installing dependencies...${NC}"
 cd "$PROJECT_DIR"
 if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ]; then
-    npm install --production
+    if command -v pnpm &> /dev/null; then
+        pnpm install --prod
+    else
+        npm install --production
+    fi
 fi
 
 # Build for production
 echo -e "${CYAN}[6/6] Building application...${NC}"
-npm run build 2>/dev/null || echo -e "${YELLOW}[INFO] Build step skipped (dev mode)${NC}"
+if command -v pnpm &> /dev/null; then
+    pnpm build 2>/dev/null || echo -e "${YELLOW}[INFO] Build step skipped${NC}"
+else
+    npm run build 2>/dev/null || echo -e "${YELLOW}[INFO] Build step skipped${NC}"
+fi
 
 # Export environment variables
 export PORT=$PORT
