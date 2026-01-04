@@ -767,11 +767,7 @@ export default function Upload() {
                       </Button>
                     )}
                     {uploadFile.status === "completed" && uploadFile.dbId && (
-                      <Link href={`/analysis/${uploadFile.dbId}`}>
-                        <Button variant="ghost" size="icon">
-                          <Eye className="w-4 h-4" />
-                        </Button>
-                      </Link>
+                      <Link href={`/analysis/${uploadFile.dbId}`} className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring hover:bg-accent hover:text-accent-foreground h-9 w-9"><Eye className="w-4 h-4" /></Link>
                     )}
                   </div>
                 </div>

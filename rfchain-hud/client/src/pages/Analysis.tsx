@@ -33,12 +33,7 @@ function AnalysisList() {
               View and explore RF signal analysis results
             </p>
           </div>
-          <Link href="/upload">
-            <Button className="gap-2">
-              <Radio className="w-4 h-4" />
-              New Analysis
-            </Button>
-          </Link>
+          <Link href="/upload" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 py-2"><Radio className="w-4 h-4" />New Analysis</Link>
         </div>
 
         {/* Analysis List */}
@@ -52,32 +47,34 @@ function AnalysisList() {
           ) : analyses && analyses.length > 0 ? (
             <div className="space-y-3">
               {analyses.map((analysis) => (
-                <Link key={analysis.id} href={`/analysis/${analysis.id}`}>
-                  <a className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg border border-border/30 hover:border-primary/50 transition-all group">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded bg-primary/20 flex items-center justify-center">
-                        <Radio className="w-6 h-6 text-primary" />
-                      </div>
-                      <div>
-                        <p className="font-medium">Analysis #{analysis.id}</p>
-                        <div className="flex items-center gap-4 mt-1">
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(analysis.createdAt).toLocaleString()}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {analysis.sampleCount?.toLocaleString() || 0} samples
-                          </span>
-                        </div>
+                <Link 
+                  key={analysis.id} 
+                  href={`/analysis/${analysis.id}`}
+                  className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg border border-border/30 hover:border-primary/50 transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded bg-primary/20 flex items-center justify-center">
+                      <Radio className="w-6 h-6 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-medium">Analysis #{analysis.id}</p>
+                      <div className="flex items-center gap-4 mt-1">
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(analysis.createdAt).toLocaleString()}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {analysis.sampleCount?.toLocaleString() || 0} samples
+                        </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <JarvisStatusIndicator
-                        status="online"
-                        label="COMPLETED"
-                      />
-                      <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-                    </div>
-                  </a>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <JarvisStatusIndicator
+                      status="online"
+                      label="COMPLETED"
+                    />
+                    <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                  </div>
                 </Link>
               ))}
             </div>
@@ -88,9 +85,7 @@ function AnalysisList() {
               <p className="text-sm text-muted-foreground mt-1">
                 Upload a signal file to begin forensic analysis
               </p>
-              <Link href="/upload">
-                <Button className="mt-4">Upload Signal</Button>
-              </Link>
+              <Link href="/upload" className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 py-2 mt-4">Upload Signal</Link>
             </div>
           )}
         </JarvisPanel>
@@ -182,9 +177,7 @@ function AnalysisDetail({ id }: { id: number }) {
           <p className="text-sm text-muted-foreground mt-1">
             The requested analysis could not be found
           </p>
-          <Link href="/analysis">
-            <Button className="mt-4">Back to List</Button>
-          </Link>
+          <Link href="/analysis" className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 py-2 mt-4">Back to List</Link>
         </div>
       </JarvisLayout>
     );
@@ -199,9 +192,7 @@ function AnalysisDetail({ id }: { id: number }) {
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
-              <Link href="/analysis">
-                <a className="hover:text-primary">Analysis</a>
-              </Link>
+              <Link href="/analysis" className="hover:text-primary">Analysis</Link>
               <ChevronRight className="w-4 h-4" />
               <span>Detail</span>
             </div>
@@ -209,12 +200,7 @@ function AnalysisDetail({ id }: { id: number }) {
               SIGNAL ANALYSIS #{id}
             </h2>
           </div>
-          <Link href={`/forensics/${id}`}>
-            <Button variant="outline" className="gap-2">
-              <Eye className="w-4 h-4" />
-              View Forensic Report
-            </Button>
-          </Link>
+          <Link href={`/forensics/${id}`} className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring border border-input bg-transparent shadow-sm hover:bg-accent hover:text-accent-foreground h-9 px-4 py-2"><Eye className="w-4 h-4" />View Forensic Report</Link>
         </div>
 
         {/* Anomaly Alert */}

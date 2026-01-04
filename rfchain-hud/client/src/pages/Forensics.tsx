@@ -43,8 +43,7 @@ function ForensicsList() {
           ) : reports && reports.length > 0 ? (
             <div className="space-y-3">
               {reports.map((report) => (
-                <Link key={report.id} href={`/forensics/${report.analysisId}`}>
-                  <a className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg border border-border/30 hover:border-primary/50 transition-all group">
+                <Link key={report.id} href={`/forensics/${report.analysisId}`} className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg border border-border/30 hover:border-primary/50 transition-all group">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded bg-green-500/20 flex items-center justify-center">
                         <Shield className="w-6 h-6 text-green-500" />
@@ -65,8 +64,7 @@ function ForensicsList() {
                       <JarvisStatusIndicator status="online" label="Valid" />
                       <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
                     </div>
-                  </a>
-                </Link>
+                  </Link>
               ))}
             </div>
           ) : (
@@ -76,9 +74,7 @@ function ForensicsList() {
               <p className="text-sm text-muted-foreground mt-1">
                 Complete a signal analysis to generate forensic chain records
               </p>
-              <Link href="/upload">
-                <Button className="mt-4">Upload Signal</Button>
-              </Link>
+              <Link href="/upload" className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 py-2 mt-4">Upload Signal</Link>
             </div>
           )}
         </JarvisPanel>
@@ -188,9 +184,7 @@ function ForensicDetail({ analysisId }: { analysisId: number }) {
           <p className="text-sm text-muted-foreground mt-1">
             The requested forensic report could not be found
           </p>
-          <Link href="/forensics">
-            <Button className="mt-4">Back to List</Button>
-          </Link>
+          <Link href="/forensics" className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 py-2 mt-4">Back to List</Link>
         </div>
       </JarvisLayout>
     );
@@ -206,9 +200,7 @@ function ForensicDetail({ analysisId }: { analysisId: number }) {
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
-              <Link href="/forensics">
-                <a className="hover:text-primary">Forensics</a>
-              </Link>
+              <Link href="/forensics" className="hover:text-primary">Forensics</Link>
               <ChevronRight className="w-4 h-4" />
               <span>Report #{analysisId}</span>
             </div>

@@ -86,23 +86,23 @@ export function JarvisLayout({ children }: JarvisLayoutProps) {
           {navItems.map((item) => {
             const isActive = location === item.href;
             return (
-              <Link key={item.href} href={item.href}>
-                <a
-                  className={cn(
-                    "flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200",
-                    "hover:bg-sidebar-accent",
-                    isActive
-                      ? "bg-sidebar-accent border border-primary/50 jarvis-text"
-                      : "text-sidebar-foreground"
-                  )}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <item.icon className={cn("w-5 h-5", isActive && "text-primary")} />
-                  <span className="text-sm font-medium uppercase tracking-wider">{item.label}</span>
-                  {isActive && (
-                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                  )}
-                </a>
+              <Link 
+                key={item.href} 
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200",
+                  "hover:bg-sidebar-accent",
+                  isActive
+                    ? "bg-sidebar-accent border border-primary/50 jarvis-text"
+                    : "text-sidebar-foreground"
+                )}
+                onClick={() => setSidebarOpen(false)}
+              >
+                <item.icon className={cn("w-5 h-5", isActive && "text-primary")} />
+                <span className="text-sm font-medium uppercase tracking-wider">{item.label}</span>
+                {isActive && (
+                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                )}
               </Link>
             );
           })}
