@@ -129,18 +129,9 @@ if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ]; then
     fi
 fi
 
-# Build for production
-echo -e "${CYAN}[6/6] Building application...${NC}"
-if command -v pnpm &> /dev/null; then
-    pnpm build 2>/dev/null || echo -e "${YELLOW}[INFO] Build step skipped${NC}"
-else
-    npm run build 2>/dev/null || echo -e "${YELLOW}[INFO] Build step skipped${NC}"
-fi
-
 # Export environment variables
 export PORT=$PORT
-export NODE_ENV=production
-export DOTENV_CONFIG_PATH="$PROJECT_DIR/.env.local"
+export NODE_ENV=development
 
 # Start the server
 echo ""
@@ -149,22 +140,13 @@ echo -e "${GREEN}║              Starting RFChain HUD on port $PORT            
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}Access the application at: ${GREEN}http://localhost:$PORT${NC}"
-echo -e "${CYAN}Logs are saved to: ${GREEN}$LOG_DIR/rfchain-hud.log${NC}"
+echo -e "${CYAN}Press Ctrl+C to stop the server${NC}"
 echo ""
 
-# Start server in background and save PID
+# Start server directly with tsx (dev mode - more reliable)
 cd "$PROJECT_DIR"
-nohup node dist/server/_core/index.js > "$LOG_DIR/rfchain-hud.log" 2>&1 &
-SERVER_PID=$!
-echo $SERVER_PID > "$PID_FILE"
-
-# Wait a moment and check if server started
-sleep 3
-if ps -p $SERVER_PID > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ Server started successfully (PID: $SERVER_PID)${NC}"
-    echo -e "${CYAN}Use ${YELLOW}./deploy/stop.sh${CYAN} to stop the server${NC}"
+if command -v pnpm &> /dev/null; then
+    PORT=$PORT pnpm dev
 else
-    echo -e "${RED}[ERROR] Server failed to start. Check logs at: $LOG_DIR/rfchain-hud.log${NC}"
-    rm -f "$PID_FILE"
-    exit 1
+    PORT=$PORT npm run dev
 fi
