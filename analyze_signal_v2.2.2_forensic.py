@@ -1573,7 +1573,15 @@ class SignalLoader:
     
     @classmethod
     def load_chunked(cls, filepath: Path, config: AnalysisConfig):
-        """Generator for streaming large files in chunks."""
+        """
+        Generator for streaming large files in chunks.
+        
+        Yields:
+            Tuple of (chunk_idx, data_array, residual_metadata)
+            - chunk_idx: Integer index of the chunk
+            - data_array: CuPy/NumPy array of complex64 samples
+            - residual_metadata: Dict with residual byte info (if any)
+        """
         if not filepath.exists():
             return
         
@@ -1583,25 +1591,42 @@ class SignalLoader:
             bytes_per_sample *= 2  # I + Q
         
         chunk_bytes = config.chunk_size * bytes_per_sample
+        accumulated_residual = bytearray()  # Track residual bytes across chunks
         
         with open(filepath, 'rb') as f:
             chunk_idx = 0
             while True:
-                data = np.frombuffer(f.read(chunk_bytes), dtype=dtype)
-                if len(data) == 0:
+                raw_data = f.read(chunk_bytes)
+                if len(raw_data) == 0:
                     break
+                
+                data = np.frombuffer(raw_data, dtype=dtype)
+                residual_metadata = {'residual_bytes': 0, 'action': 'none_required'}
                 
                 if config.data_format in (DataFormat.INT16_IQ, DataFormat.INT8_IQ):
                     if len(data) % 2 != 0:
                         # FORENSIC FIX: Preserve residual bytes instead of silent truncation
-                        residual_byte = data[-1:]
+                        residual_bytes = data[-1:].tobytes()
+                        accumulated_residual.extend(residual_bytes)
+                        residual_hash = hashlib.sha256(bytes(accumulated_residual)).hexdigest()
                         data = data[:-1]
-                        log.warning(f"FORENSIC: 1 residual byte preserved (not truncated)")
+                        residual_metadata = {
+                            'residual_bytes': len(accumulated_residual),
+                            'residual_bytes_hex': bytes(accumulated_residual).hex(),
+                            'residual_hash_sha256': residual_hash,
+                            'action': 'preserved_not_truncated',
+                            'chunk_idx': chunk_idx
+                        }
+                        log.warning(f"FORENSIC: Chunk {chunk_idx}: 1 residual byte preserved (total: {len(accumulated_residual)})")
                     data = data.astype(np.float32) * scale
                     data = data[0::2] + 1j * data[1::2]
                 
-                yield chunk_idx, cp.asarray(data.astype(np.complex64))
+                yield chunk_idx, cp.asarray(data.astype(np.complex64)), residual_metadata
                 chunk_idx += 1
+            
+            # Yield final residual summary if any bytes accumulated
+            if len(accumulated_residual) > 0:
+                log.info(f"FORENSIC: Total residual bytes across all chunks: {len(accumulated_residual)}")
 
 
 # =============================================================================
@@ -2474,9 +2499,13 @@ class SignalAnalyzer:
                     psd_accum += cp.abs(cp.fft.fft(windowed)) ** 2
                 
                 # FORENSIC FIX: Apply ENBW correction
+                # ENBW corrects for the noise bandwidth widening caused by windowing
+                # PSD_corrected = PSD_raw / ENBW to get true power spectral density
                 enbw = compute_enbw(cp_asnumpy(window))
                 
-                spectrum = cp.fft.fftshift(psd_accum / n_segments)
+                # Apply ENBW correction: divide by ENBW to normalize for window effects
+                spectrum = cp.fft.fftshift(psd_accum / n_segments / enbw)
+                log.debug(f"FORENSIC: Applied ENBW correction factor: {enbw:.4f}")
             
             magnitude_db = 10 * cp.log10(cp.abs(spectrum) + 1e-12)
             mag_cpu = cp_asnumpy(magnitude_db)
@@ -2682,23 +2711,31 @@ class SignalAnalyzer:
             acf_cpu = cp_asnumpy(autocorr_mag[center - span:center + span])
         
         lags = np.arange(-span, span)
-        lag_time_us = lags / self.config.sample_rate * 1e6
+        lag_time_us = lags / self.config.sample_rate * 1e6  # Convert to microseconds
         
         fig, axes = plt.subplots(2, 1, figsize=(14, 8))
         
-        # Full view
-        axes[0].plot(lags, acf_cpu, color=self.colors['primary'], linewidth=0.8)
-        axes[0].set_xlabel('Lag (samples)', fontsize=11)
+        # Full view - use time units (microseconds) for better physical interpretation
+        axes[0].plot(lag_time_us, acf_cpu, color=self.colors['primary'], linewidth=0.8)
+        axes[0].set_xlabel('Lag (µs)', fontsize=11)
         axes[0].set_ylabel('Correlation', fontsize=11)
         axes[0].set_title('Autocorrelation Function', fontsize=12)
         axes[0].grid(True, alpha=0.3, color=self.colors['grid'])
+        # Add secondary x-axis showing samples
+        ax0_samples = axes[0].twiny()
+        ax0_samples.set_xlim(axes[0].get_xlim())
+        ax0_samples.set_xlabel('Lag (samples)', fontsize=9, color='gray')
+        sample_ticks = np.linspace(-span, span, 9).astype(int)
+        ax0_samples.set_xticks(sample_ticks / self.config.sample_rate * 1e6)
+        ax0_samples.set_xticklabels(sample_ticks, fontsize=8, color='gray')
         
-        # Zoomed view (first 100 lags)
+        # Zoomed view (first 100 lags) - also use time units
         zoom_span = min(100, span)
-        axes[1].stem(lags[span:span + zoom_span], acf_cpu[span:span + zoom_span],
+        zoom_time_us = lag_time_us[span:span + zoom_span]
+        axes[1].stem(zoom_time_us, acf_cpu[span:span + zoom_span],
                     linefmt=self.colors['tertiary'], markerfmt='o', 
                     basefmt='gray')
-        axes[1].set_xlabel('Lag (samples)', fontsize=11)
+        axes[1].set_xlabel('Lag (µs)', fontsize=11)
         axes[1].set_ylabel('Correlation', fontsize=11)
         axes[1].set_title('Autocorrelation (First 100 Positive Lags)', fontsize=12)
         axes[1].grid(True, alpha=0.3, color=self.colors['grid'])
@@ -4150,25 +4187,33 @@ def main():
         
         if args.streaming:
             # Streaming mode for large files
-            # Issue 6 Fix: Track residual metadata across chunks
+            # Issue 6 Fix: Track residual metadata across chunks (now properly implemented)
             log.info("Using streaming mode...")
             all_metrics = []
-            accumulated_residual = {'chunks_processed': 0, 'inter_chunk_residuals': []}
-            for chunk_idx, chunk in SignalLoader.load_chunked(filepath, config):
+            accumulated_residual = {
+                'chunks_processed': 0, 
+                'inter_chunk_residuals': [],
+                'total_residual_bytes': 0
+            }
+            for chunk_idx, chunk, chunk_residual_meta in SignalLoader.load_chunked(filepath, config):
                 chunk_name = f"{filepath.stem}_chunk{chunk_idx:03d}"
-                # Note: load_chunked should be updated to return residual metadata per chunk
-                # For now, track chunk boundaries
+                # Merge chunk metadata with residual info from loader
                 chunk_residual = {
                     'chunk_idx': chunk_idx,
                     'chunk_samples': len(chunk),
-                    'timestamp_utc': datetime.now(timezone.utc).isoformat()
+                    'timestamp_utc': datetime.now(timezone.utc).isoformat(),
+                    **chunk_residual_meta  # Include residual byte info from loader
                 }
                 accumulated_residual['inter_chunk_residuals'].append(chunk_residual)
                 accumulated_residual['chunks_processed'] += 1
+                if chunk_residual_meta.get('residual_bytes', 0) > 0:
+                    accumulated_residual['total_residual_bytes'] = chunk_residual_meta['residual_bytes']
                 metrics = analyzer.run_full_analysis(chunk, chunk_name, enable_v3=args.v3,
                                                     residual_metadata=chunk_residual)
                 all_metrics.append(metrics.to_dict())
             log.info(f"Streaming complete: {accumulated_residual['chunks_processed']} chunks processed")
+            if accumulated_residual['total_residual_bytes'] > 0:
+                log.info(f"FORENSIC: Total residual bytes preserved: {accumulated_residual['total_residual_bytes']}")
         else:
             # Standard mode
             # FORENSIC: SignalLoader.load now returns (data, residual_metadata) tuple
