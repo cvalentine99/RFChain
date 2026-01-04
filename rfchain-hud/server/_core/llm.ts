@@ -66,6 +66,9 @@ export type InvokeParams = {
   output_schema?: OutputSchema;
   responseFormat?: ResponseFormat;
   response_format?: ResponseFormat;
+  // Local LLM options
+  localEndpoint?: string;
+  model?: string;
 };
 
 export type ToolCall = {
@@ -209,14 +212,61 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-const resolveApiUrl = () =>
-  ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
+// Determine which LLM backend to use
+type LLMBackend = 'forge' | 'ollama' | 'anthropic' | 'openai' | 'none';
 
-const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+function detectLLMBackend(): LLMBackend {
+  // Check for Ollama (local LLM)
+  if (process.env.OLLAMA_HOST) {
+    return 'ollama';
+  }
+  
+  // Check for Anthropic API
+  if (process.env.ANTHROPIC_API_KEY) {
+    return 'anthropic';
+  }
+  
+  // Check for OpenAI API
+  if (process.env.OPENAI_API_KEY) {
+    return 'openai';
+  }
+  
+  // Check for Forge API (Manus built-in)
+  if (ENV.forgeApiUrl && ENV.forgeApiKey) {
+    return 'forge';
+  }
+  
+  return 'none';
+}
+
+const resolveApiUrl = (backend: LLMBackend): string => {
+  switch (backend) {
+    case 'ollama':
+      const ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
+      return `${ollamaHost.replace(/\/$/, "")}/api/chat`;
+    case 'anthropic':
+      return 'https://api.anthropic.com/v1/messages';
+    case 'openai':
+      return 'https://api.openai.com/v1/chat/completions';
+    case 'forge':
+    default:
+      return ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
+        ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
+        : "https://forge.manus.im/v1/chat/completions";
+  }
+};
+
+const getApiKey = (backend: LLMBackend): string => {
+  switch (backend) {
+    case 'anthropic':
+      return process.env.ANTHROPIC_API_KEY || '';
+    case 'openai':
+      return process.env.OPENAI_API_KEY || '';
+    case 'forge':
+      return ENV.forgeApiKey || '';
+    case 'ollama':
+    default:
+      return ''; // Ollama doesn't need an API key
   }
 };
 
@@ -265,9 +315,155 @@ const normalizeResponseFormat = ({
   };
 };
 
-export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  assertApiKey();
+// Ollama-specific invocation
+async function invokeOllama(params: InvokeParams): Promise<InvokeResult> {
+  const { messages, model } = params;
+  const ollamaModel = model || process.env.OLLAMA_MODEL || 'llama3';
+  const ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
+  
+  // Convert messages to Ollama format
+  const ollamaMessages = messages.map(msg => ({
+    role: msg.role === 'system' ? 'system' : msg.role === 'assistant' ? 'assistant' : 'user',
+    content: typeof msg.content === 'string' 
+      ? msg.content 
+      : Array.isArray(msg.content) 
+        ? msg.content.map(c => typeof c === 'string' ? c : (c as TextContent).text).join('\n')
+        : String(msg.content)
+  }));
+  
+  const response = await fetch(`${ollamaHost}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: ollamaModel,
+      messages: ollamaMessages,
+      stream: false
+    })
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Ollama invoke failed: ${response.status} ${response.statusText} – ${errorText}`);
+  }
+  
+  const result = await response.json();
+  
+  // Convert Ollama response to standard format
+  return {
+    id: `ollama-${Date.now()}`,
+    created: Math.floor(Date.now() / 1000),
+    model: ollamaModel,
+    choices: [{
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: result.message?.content || ''
+      },
+      finish_reason: 'stop'
+    }],
+    usage: {
+      prompt_tokens: result.prompt_eval_count || 0,
+      completion_tokens: result.eval_count || 0,
+      total_tokens: (result.prompt_eval_count || 0) + (result.eval_count || 0)
+    }
+  };
+}
 
+// Anthropic-specific invocation
+async function invokeAnthropic(params: InvokeParams): Promise<InvokeResult> {
+  const { messages, model, maxTokens, max_tokens } = params;
+  const anthropicModel = model || 'claude-3-5-sonnet-20241022';
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY is not configured');
+  }
+  
+  // Extract system message and convert others
+  let systemPrompt = '';
+  const anthropicMessages = messages.filter(msg => {
+    if (msg.role === 'system') {
+      systemPrompt = typeof msg.content === 'string' 
+        ? msg.content 
+        : Array.isArray(msg.content)
+          ? msg.content.map(c => typeof c === 'string' ? c : (c as TextContent).text).join('\n')
+          : String(msg.content);
+      return false;
+    }
+    return true;
+  }).map(msg => ({
+    role: msg.role === 'assistant' ? 'assistant' : 'user',
+    content: typeof msg.content === 'string' 
+      ? msg.content 
+      : Array.isArray(msg.content)
+        ? msg.content.map(c => typeof c === 'string' ? c : (c as TextContent).text).join('\n')
+        : String(msg.content)
+  }));
+  
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: anthropicModel,
+      max_tokens: maxTokens || max_tokens || 4096,
+      system: systemPrompt || undefined,
+      messages: anthropicMessages
+    })
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Anthropic invoke failed: ${response.status} ${response.statusText} – ${errorText}`);
+  }
+  
+  const result = await response.json();
+  
+  // Convert Anthropic response to standard format
+  return {
+    id: result.id,
+    created: Math.floor(Date.now() / 1000),
+    model: result.model,
+    choices: [{
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: result.content?.[0]?.text || ''
+      },
+      finish_reason: result.stop_reason || 'stop'
+    }],
+    usage: {
+      prompt_tokens: result.usage?.input_tokens || 0,
+      completion_tokens: result.usage?.output_tokens || 0,
+      total_tokens: (result.usage?.input_tokens || 0) + (result.usage?.output_tokens || 0)
+    }
+  };
+}
+
+export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
+  const backend = detectLLMBackend();
+  
+  if (backend === 'none') {
+    throw new Error(
+      'No LLM backend configured. Set one of: OLLAMA_HOST (local), ANTHROPIC_API_KEY, OPENAI_API_KEY, or BUILT_IN_FORGE_API_URL + BUILT_IN_FORGE_API_KEY'
+    );
+  }
+  
+  console.log(`[LLM] Using backend: ${backend}`);
+  
+  // Use specialized handlers for Ollama and Anthropic
+  if (backend === 'ollama') {
+    return invokeOllama(params);
+  }
+  
+  if (backend === 'anthropic') {
+    return invokeAnthropic(params);
+  }
+  
+  // Standard OpenAI-compatible API (Forge, OpenAI)
   const {
     messages,
     tools,
@@ -279,8 +475,13 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     response_format,
   } = params;
 
+  const apiKey = getApiKey(backend);
+  if (!apiKey) {
+    throw new Error(`API key not configured for ${backend}`);
+  }
+
   const payload: Record<string, unknown> = {
-    model: "gemini-2.5-flash",
+    model: params.model || (backend === 'openai' ? 'gpt-4o' : 'gemini-2.5-flash'),
     messages: messages.map(normalizeMessage),
   };
 
@@ -296,9 +497,13 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.tool_choice = normalizedToolChoice;
   }
 
-  payload.max_tokens = 32768
-  payload.thinking = {
-    "budget_tokens": 128
+  payload.max_tokens = params.maxTokens || params.max_tokens || 32768;
+  
+  // Only add thinking for Forge/Gemini
+  if (backend === 'forge') {
+    payload.thinking = {
+      "budget_tokens": 128
+    };
   }
 
   const normalizedResponseFormat = normalizeResponseFormat({
@@ -312,11 +517,11 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetch(resolveApiUrl(), {
+  const response = await fetch(resolveApiUrl(backend), {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
+      authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(payload),
   });
@@ -329,4 +534,9 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   }
 
   return (await response.json()) as InvokeResult;
+}
+
+// Export backend detection for status checks
+export function getLLMBackend(): LLMBackend {
+  return detectLLMBackend();
 }

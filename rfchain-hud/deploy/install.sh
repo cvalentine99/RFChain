@@ -1,6 +1,12 @@
 #!/bin/bash
-# RFChain HUD - One-Command Installation Script
-# For Lubuntu 24.04 with Conda
+# ============================================================================
+# RFChain HUD - Complete Installation Script
+# Forensic Signal Intelligence System - Self-Hosted
+# ============================================================================
+# For Lubuntu 24.04 with RTX 4090 GPU
+# This script installs all dependencies for FULLY SELF-HOSTED operation
+# No external cloud dependencies required
+# ============================================================================
 
 set -e
 
@@ -17,8 +23,8 @@ NC='\033[0m'
 
 echo -e "${CYAN}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║          RFChain HUD - Installation Script                   ║"
-echo "║                   Lubuntu 24.04 + Conda                      ║"
+echo "║          RFChain HUD - Self-Hosted Installation             ║"
+echo "║          Forensic Signal Intelligence System                ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -117,10 +123,30 @@ echo -e "${GREEN}║              Installation Complete!                        
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "${CYAN}Next steps:${NC}"
-echo -e "  1. Edit ${YELLOW}.env.local${NC} to add your API keys (ANTHROPIC_API_KEY, etc.)"
-echo -e "  2. Start the server: ${YELLOW}./deploy/start.sh${NC}"
-echo -e "  3. Open browser: ${GREEN}http://localhost:3007${NC}"
 echo ""
-echo -e "${CYAN}For development mode: ${YELLOW}./deploy/dev.sh${NC}"
-echo -e "${CYAN}To stop the server: ${YELLOW}./deploy/stop.sh${NC}"
+echo -e "  ${YELLOW}1. Set up the database:${NC}"
+echo -e "     ${GREEN}./deploy/setup-mysql.sh${NC}"
+echo ""
+echo -e "  ${YELLOW}2. Edit configuration:${NC}"
+echo -e "     ${GREEN}nano .env.local${NC}"
+echo -e "     - Verify PYTHON_PATH points to your conda environment"
+echo -e "     - Verify ANALYSIS_SCRIPT_PATH points to your analysis script"
+echo -e "     - Configure LLM (Ollama recommended for fully offline use)"
+echo ""
+echo -e "  ${YELLOW}3. Run database migration:${NC}"
+echo -e "     ${GREEN}pnpm db:push${NC}"
+echo ""
+echo -e "  ${YELLOW}4. Start the server:${NC}"
+echo -e "     ${GREEN}./deploy/start.sh${NC}"
+echo ""
+echo -e "  ${YELLOW}5. Access the application:${NC}"
+echo -e "     ${GREEN}http://localhost:3007${NC}"
+echo -e "     (First user to register becomes admin)"
+echo ""
+echo -e "${CYAN}Optional: Install Ollama for fully offline AI assistant:${NC}"
+echo -e "  ${GREEN}curl -fsSL https://ollama.com/install.sh | sh${NC}"
+echo -e "  ${GREEN}ollama pull llama3${NC}"
+echo ""
+echo -e "${CYAN}Optional: Install as systemd service for auto-start:${NC}"
+echo -e "  ${GREEN}./deploy/install-service.sh${NC}"
 echo ""

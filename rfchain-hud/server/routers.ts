@@ -12,9 +12,122 @@ export const appRouter = router({
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    
+    // Local authentication - login
+    login: publicProcedure
+      .input(z.object({
+        username: z.string().min(3).max(64),
+        password: z.string().min(6),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const user = await db.verifyLocalUser(input.username, input.password);
+        if (!user) {
+          throw new Error('Invalid username or password');
+        }
+        
+        const sessionToken = await db.createSession(user.id);
+        if (!sessionToken) {
+          throw new Error('Failed to create session');
+        }
+        
+        // Set session cookie
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie('session_token', sessionToken, {
+          ...cookieOptions,
+          maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        });
+        
+        return { success: true, user: { id: user.id, name: user.name, role: user.role } };
+      }),
+    
+    // Local authentication - register (only if no users exist or user is admin)
+    register: publicProcedure
+      .input(z.object({
+        username: z.string().min(3).max(64),
+        password: z.string().min(6),
+        name: z.string().optional(),
+        email: z.string().email().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // Check if this is the first user (will be admin)
+        const userCount = await db.getUserCount();
+        const isFirstUser = userCount === 0;
+        
+        // If not first user, require admin auth
+        if (!isFirstUser && (!ctx.user || ctx.user.role !== 'admin')) {
+          throw new Error('Only admins can register new users');
+        }
+        
+        try {
+          const user = await db.createLocalUser(
+            input.username,
+            input.password,
+            input.name,
+            input.email,
+            isFirstUser ? 'admin' : 'user'
+          );
+          
+          if (!user) {
+            throw new Error('Failed to create user');
+          }
+          
+          // Auto-login the first user
+          if (isFirstUser) {
+            const sessionToken = await db.createSession(user.id);
+            if (sessionToken) {
+              const cookieOptions = getSessionCookieOptions(ctx.req);
+              ctx.res.cookie('session_token', sessionToken, {
+                ...cookieOptions,
+                maxAge: 7 * 24 * 60 * 60 * 1000,
+              });
+            }
+          }
+          
+          return { success: true, isFirstUser, user: { id: user.id, name: user.name, role: user.role } };
+        } catch (error) {
+          throw new Error(error instanceof Error ? error.message : 'Registration failed');
+        }
+      }),
+    
+    // Change password
+    changePassword: protectedProcedure
+      .input(z.object({
+        currentPassword: z.string(),
+        newPassword: z.string().min(6),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // Verify current password
+        if (ctx.user.username) {
+          const verified = await db.verifyLocalUser(ctx.user.username, input.currentPassword);
+          if (!verified) {
+            throw new Error('Current password is incorrect');
+          }
+        }
+        
+        const success = await db.changePassword(ctx.user.id, input.newPassword);
+        if (!success) {
+          throw new Error('Failed to change password');
+        }
+        
+        return { success: true };
+      }),
+    
+    // Check if setup is needed (no users exist)
+    needsSetup: publicProcedure.query(async () => {
+      const userCount = await db.getUserCount();
+      return { needsSetup: userCount === 0 };
+    }),
+    
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      // Delete session from database
+      const sessionToken = ctx.req.cookies?.session_token;
+      if (sessionToken) {
+        await db.deleteSession(sessionToken);
+      }
+      
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie('session_token', { ...cookieOptions, maxAge: -1 });
       return {
         success: true,
       } as const;
@@ -346,7 +459,7 @@ export const appRouter = router({
           hashChain,
           analyst: {
             name: ctx.user.name || "Unknown",
-            id: ctx.user.openId,
+            id: ctx.user.openId || ctx.user.username || String(ctx.user.id),
           },
         });
         

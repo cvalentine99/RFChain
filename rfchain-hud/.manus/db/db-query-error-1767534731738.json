@@ -1,0 +1,8 @@
+{
+  "query": "SELECT id, upload_id, plot_urls FROM analysis_results WHERE upload_id = 6 LIMIT 1;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 321SQ8v7PaepPzJ.0f8ef369afb1 --database SXvF6ygASMGW5HtMdJT4My --execute SELECT id, upload_id, plot_urls FROM analysis_results WHERE upload_id = 6 LIMIT 1;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'upload_id' in 'where clause'"
+  ]
+}

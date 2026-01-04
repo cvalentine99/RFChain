@@ -244,3 +244,18 @@
 - [ ] Fix port binding - don't auto-select, fail if busy
 - [ ] Fix createSignalUpload null handling
 - [ ] Fix storage helpers for missing env vars gracefully
+
+
+## Self-Hosted Forensic Mode (Air-Gapped) ✅ COMPLETED
+- [x] Replace Manus OAuth with local username/password authentication
+- [x] Add bcrypt password hashing for secure local auth
+- [x] Create local user registration and login pages (first user = admin)
+- [x] Keep MySQL database (more robust than SQLite for production)
+- [x] Add local filesystem storage fallback (no S3 required)
+- [x] Multi-LLM backend support (Ollama for offline, Anthropic/OpenAI optional)
+- [x] Make JARVIS AI work with local LLM (Ollama) for fully offline operation
+- [x] Update .env.local template for standalone operation
+- [x] Update deployment scripts for air-gapped installation
+- [x] Create comprehensive DEPLOY.md for self-hosted deployment
+- [x] Add tests for local authentication (9 tests passing)
+- [x] All 99 tests passing

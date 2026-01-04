@@ -43,6 +43,13 @@
       "when": 1767540194892,
       "tag": "0005_last_wiccan",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1767549780512,
+      "tag": "0006_melodic_miracleman",
+      "breakpoints": true
     }
   ]
 }

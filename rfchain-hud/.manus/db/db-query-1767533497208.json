@@ -1,0 +1,36 @@
+{
+  "query": "SELECT * FROM signal_uploads ORDER BY id DESC LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 321SQ8v7PaepPzJ.0f8ef369afb1 --database SXvF6ygASMGW5HtMdJT4My --execute SELECT * FROM signal_uploads ORDER BY id DESC LIMIT 5;",
+  "rows": [
+    {
+      "id": "2",
+      "userId": "1",
+      "filename": "dumpBeforeFft(13).bin",
+      "originalName": "dumpBeforeFft(13).bin",
+      "fileSize": "4194304",
+      "mimeType": "application/octet-stream",
+      "s3Key": "signals/1/1767533328347-hti892xv-dumpBeforeFft(13).bin",
+      "s3Url": "https://d2xsxph8kpxj0f.cloudfront.net/310519663246071970/SXvF6ygASMGW5HtMdJT4My/signals/1/1767533328347-hti892xv-dumpBeforeFft(13).bin",
+      "status": "processing",
+      "createdAt": "2026-01-04 13:28:48",
+      "updatedAt": "2026-01-04 13:28:50"
+    },
+    {
+      "id": "1",
+      "userId": "1",
+      "filename": "dumpBeforeFft (2).bin",
+      "originalName": "dumpBeforeFft (2).bin",
+      "fileSize": "4194304",
+      "mimeType": "application/octet-stream",
+      "s3Key": "signals/1/1767532741231-qvm35lpa-dumpBeforeFft (2).bin",
+      "s3Url": "https://d2xsxph8kpxj0f.cloudfront.net/310519663246071970/SXvF6ygASMGW5HtMdJT4My/signals/1/1767532741231-qvm35lpa-dumpBeforeFft (2).bin",
+      "status": "processing",
+      "createdAt": "2026-01-04 13:19:01",
+      "updatedAt": "2026-01-04 13:19:03"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tuserId\tfilename\toriginalName\tfileSize\tmimeType\ts3Key\ts3Url\tstatus\tcreatedAt\tupdatedAt\n2\t1\tdumpBeforeFft(13).bin\tdumpBeforeFft(13).bin\t4194304\tapplication/octet-stream\tsignals/1/1767533328347-hti892xv-dumpBeforeFft(13).bin\thttps://d2xsxph8kpxj0f.cloudfront.net/310519663246071970/SXvF6ygASMGW5HtMdJT4My/signals/1/1767533328347-hti892xv-dumpBeforeFft(13).bin\tprocessing\t2026-01-04 13:28:48\t2026-01-04 13:28:50\n1\t1\tdumpBeforeFft (2).bin\tdumpBeforeFft (2).bin\t4194304\tapplication/octet-stream\tsignals/1/1767532741231-qvm35lpa-dumpBeforeFft (2).bin\thttps://d2xsxph8kpxj0f.cloudfront.net/310519663246071970/SXvF6ygASMGW5HtMdJT4My/signals/1/1767532741231-qvm35lpa-dumpBeforeFft (2).bin\tprocessing\t2026-01-04 13:19:01\t2026-01-04 13:19:03\n",
+  "stderr": "",
+  "execution_time_ms": 55
+}

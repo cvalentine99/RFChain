@@ -49,9 +49,18 @@ describe("auth.logout", () => {
     const result = await caller.auth.logout();
 
     expect(result).toEqual({ success: true });
-    expect(clearedCookies).toHaveLength(1);
+    // Now clears both OAuth cookie and local session_token cookie
+    expect(clearedCookies).toHaveLength(2);
     expect(clearedCookies[0]?.name).toBe(COOKIE_NAME);
     expect(clearedCookies[0]?.options).toMatchObject({
+      maxAge: -1,
+      secure: true,
+      sameSite: "none",
+      httpOnly: true,
+      path: "/",
+    });
+    expect(clearedCookies[1]?.name).toBe('session_token');
+    expect(clearedCookies[1]?.options).toMatchObject({
       maxAge: -1,
       secure: true,
       sameSite: "none",

@@ -10,6 +10,7 @@ import Analysis from "./pages/Analysis";
 import Forensics from "./pages/Forensics";
 import Settings from "./pages/Settings";
 import Compare from "./pages/Compare";
+import Login from "./pages/Login";
 
 function Router() {
   return (
@@ -22,6 +23,7 @@ function Router() {
       <Route path="/forensics/:id" component={Forensics} />
       <Route path="/settings" component={Settings} />
       <Route path="/compare" component={Compare} />
+      <Route path="/login" component={Login} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

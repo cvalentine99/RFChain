@@ -1,0 +1,26 @@
+{
+  "query": "SELECT id, analysisId, rawInputHash, postMetricsHash, rawInputHashSha3, postMetricsHashSha3 FROM forensic_reports LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 321SQ8v7PaepPzJ.0f8ef369afb1 --database SXvF6ygASMGW5HtMdJT4My --execute SELECT id, analysisId, rawInputHash, postMetricsHash, rawInputHashSha3, postMetricsHashSha3 FROM forensic_reports LIMIT 5;",
+  "rows": [
+    {
+      "id": "1",
+      "analysisId": "1",
+      "rawInputHash": "NULL",
+      "postMetricsHash": "NULL",
+      "rawInputHashSha3": "NULL",
+      "postMetricsHashSha3": "NULL"
+    },
+    {
+      "id": "2",
+      "analysisId": "2",
+      "rawInputHash": "NULL",
+      "postMetricsHash": "NULL",
+      "rawInputHashSha3": "NULL",
+      "postMetricsHashSha3": "NULL"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tanalysisId\trawInputHash\tpostMetricsHash\trawInputHashSha3\tpostMetricsHashSha3\n1\t1\tNULL\tNULL\tNULL\tNULL\n2\t2\tNULL\tNULL\tNULL\tNULL\n",
+  "stderr": "",
+  "execution_time_ms": 54
+}

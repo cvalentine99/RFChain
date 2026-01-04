@@ -5,7 +5,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
-import { createContext } from "./context";
+import { createContext, authenticateRestRequest } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import multer from "multer";
 import { storagePut, storageGet } from "../storage";
@@ -14,8 +14,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { fileURLToPath } from "url";
-import { sdk } from "./sdk";
-import { COOKIE_NAME } from "@shared/const";
+import { ENV } from "./env";
+import cookieParser from "cookie-parser";
 
 // ESM compatibility for __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -81,11 +81,19 @@ async function bindToAvailablePort(server: ReturnType<typeof createServer>, star
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  // OAuth callback under /api/oauth/callback
-  registerOAuthRoutes(app);
+  app.use(cookieParser());
+  
+  // OAuth callback under /api/oauth/callback (only if OAuth is configured)
+  if (ENV.oAuthServerUrl && ENV.appId) {
+    console.log("[Auth] OAuth configured, registering OAuth routes");
+    registerOAuthRoutes(app);
+  } else {
+    console.log("[Auth] Running in self-hosted mode (local authentication only)");
+  }
   
   // Local storage directory for uploaded signals
   const uploadsDir = path.join(__dirname, "..", "..", "uploads");
@@ -96,10 +104,13 @@ async function startServer() {
   // Serve analysis output files (plots, metrics) as static files
   app.use("/analysis_output", express.static(analysisOutputDir));
   
-  // Authentication middleware for REST endpoints
+  // Authentication middleware for REST endpoints (supports both local and OAuth)
   const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const user = await sdk.authenticateRequest(req);
+      const user = await authenticateRestRequest(req);
+      if (!user) {
+        return res.status(401).json({ error: "Authentication required. Please log in." });
+      }
       (req as any).user = user;
       next();
     } catch (error) {
@@ -190,12 +201,19 @@ async function startServer() {
       const localPath = req.file.path;
       const filename = req.file.filename;
       
-      // Upload to S3 for Whisper API access
-      const audioBuffer = fs.readFileSync(localPath);
-      const s3Key = `audio/${filename}`;
-      const { url } = await storagePut(s3Key, audioBuffer, req.file.mimetype || 'audio/webm');
-      
-      console.log("[Audio] Uploaded to S3:", url);
+      // For self-hosted mode, just return local path
+      // S3 upload is optional and only used if configured
+      let url = localPath;
+      try {
+        const audioBuffer = fs.readFileSync(localPath);
+        const s3Key = `audio/${filename}`;
+        const result = await storagePut(s3Key, audioBuffer, req.file.mimetype || 'audio/webm');
+        url = result.url;
+        console.log("[Audio] Uploaded to S3:", url);
+      } catch (s3Error) {
+        console.log("[Audio] S3 not configured, using local storage:", localPath);
+        url = `/audio/${filename}`;
+      }
       
       res.json({ 
         url: url,
@@ -208,10 +226,10 @@ async function startServer() {
     }
   });
   
-  // Analysis execution endpoint
-  // Serve analysis output files statically
-  app.use("/analysis_output", express.static(analysisOutputDir));
+  // Serve audio files locally
+  app.use("/audio", express.static(audioDir));
   
+  // Analysis execution endpoint
   app.post("/api/analyze", rateLimit, requireAuth, express.json(), async (req, res) => {
     try {
       const { localPath, uploadId, sampleRate, centerFreq, dataFormat, enableDigital, enableV3 } = req.body;
@@ -234,7 +252,7 @@ async function startServer() {
       console.log("[Analysis] Input file:", localPath, "Output dir:", outputDir);
       
       // Build analysis command
-      const scriptPath = path.join(__dirname, "..", "run_analysis.py");
+      const scriptPath = ENV.analysisScriptPath || path.join(__dirname, "..", "run_analysis.py");
       const args = [
         scriptPath,
         localPath,  // Use local file path directly
@@ -252,7 +270,7 @@ async function startServer() {
       console.log("[Analysis] Args:", args);
       
       // Get Python path from environment or use default
-      const pythonPath = process.env.PYTHON_PATH || "python3";
+      const pythonPath = ENV.pythonPath || "python3";
       console.log("[Analysis] Using Python:", pythonPath);
       
       // Execute analysis with clean Python environment
@@ -336,14 +354,42 @@ async function startServer() {
         }
       });
       
-      python.on("error", (err) => {
-        console.error("Python process error:", err);
-        res.status(500).json({ error: "Failed to start analysis process" });
-      });
-      
     } catch (error) {
       console.error("Analysis error:", error);
       res.status(500).json({ error: "Analysis failed" });
+    }
+  });
+  
+  // Health check endpoint (public)
+  app.get("/api/health", async (req, res) => {
+    try {
+      const { healthCheck } = await import("../db");
+      const dbStatus = await healthCheck();
+      
+      // Check GPU availability
+      let gpuAvailable = false;
+      try {
+        const { execSync } = await import("child_process");
+        execSync("nvidia-smi", { stdio: "ignore" });
+        gpuAvailable = true;
+      } catch {
+        gpuAvailable = false;
+      }
+      
+      res.json({
+        status: dbStatus.connected ? "healthy" : "degraded",
+        timestamp: new Date().toISOString(),
+        services: {
+          database: dbStatus,
+          gpu: { available: gpuAvailable },
+          auth: { mode: ENV.oAuthServerUrl ? "oauth" : "local" }
+        }
+      });
+    } catch (error) {
+      res.status(500).json({
+        status: "unhealthy",
+        error: String(error)
+      });
     }
   });
   
@@ -355,6 +401,7 @@ async function startServer() {
       createContext,
     })
   );
+  
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
@@ -362,13 +409,15 @@ async function startServer() {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000", 10);
+  // Use ENV.port (defaults to 3007 for self-hosted)
+  const preferredPort = ENV.port;
   const port = await bindToAvailablePort(server, preferredPort);
 
   if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+    console.log(`⚠️  Port ${preferredPort} is busy, using port ${port} instead`);
   }
-  console.log(`Server running on http://localhost:${port}/`);
+  console.log(`🚀 RFChain HUD running on http://localhost:${port}/`);
+  console.log(`📊 Mode: ${ENV.isSelfHosted ? 'Self-Hosted (Local Auth)' : 'Cloud (OAuth)'}`);
 }
 
 startServer().catch(console.error);

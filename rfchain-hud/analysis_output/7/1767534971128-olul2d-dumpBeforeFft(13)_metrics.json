@@ -1,0 +1,105 @@
+{
+  "analysis_timestamp": "2026-01-04T08:56:34.947506",
+  "analyzer_version": "2.2.2-forensic",
+  "file_metadata": {
+    "source_file": "/home/ubuntu/rfchain-hud/uploads/1767534971128-olul2d-dumpBeforeFft(13).bin",
+    "filename": "1767534971128-olul2d-dumpBeforeFft(13).bin",
+    "file_size_bytes": 4194304,
+    "file_size_mb": 4.19,
+    "file_modified": "2026-01-04T08:56:11.185800",
+    "file_created": "2026-01-04T08:56:11.185800",
+    "file_sha256": "d3a60e5592444987c3d2e299525b2bfbc1ab13812f16593d36ece94881eea3bd",
+    "file_sha3_256": "aa18b0f7dc1ca55180a82b330b3d2ce6309242ac12487bd51a768d699d6f2564",
+    "hash_timestamp_utc": "2026-01-04T13:56:34.934058+00:00"
+  },
+  "residual_metadata": {
+    "residual_bytes": 0,
+    "action": "none_required"
+  },
+  "forensic_pipeline": {
+    "hash_chain": [
+      {
+        "stage": "raw_input",
+        "hash": "d3a60e5592444987c3d2e299525b2bfbc1ab13812f16593d36ece94881eea3bd",
+        "timestamp_utc": "2026-01-04T13:56:15.683244+00:00",
+        "data_shape": [
+          524288
+        ],
+        "data_dtype": "complex64",
+        "details": {
+          "source": "1767534971128-olul2d-dumpBeforeFft(13).bin",
+          "sample_count": 524288,
+          "dtype": "complex64"
+        }
+      },
+      {
+        "stage": "post_metrics",
+        "hash": "d3a60e5592444987c3d2e299525b2bfbc1ab13812f16593d36ece94881eea3bd",
+        "timestamp_utc": "2026-01-04T13:56:15.709677+00:00",
+        "data_shape": [
+          524288
+        ],
+        "data_dtype": "complex64",
+        "details": {
+          "avg_power_dbm": -28.71906328233453,
+          "snr_estimate_db": 0.0
+        }
+      },
+      {
+        "stage": "post_anomaly_detection",
+        "hash": "d3a60e5592444987c3d2e299525b2bfbc1ab13812f16593d36ece94881eea3bd",
+        "timestamp_utc": "2026-01-04T13:56:34.907882+00:00",
+        "data_shape": [
+          524288
+        ],
+        "data_dtype": "complex64",
+        "details": {
+          "anomalies_found": false
+        }
+      },
+      {
+        "stage": "pre_output",
+        "hash": "d3a60e5592444987c3d2e299525b2bfbc1ab13812f16593d36ece94881eea3bd",
+        "timestamp_utc": "2026-01-04T13:56:34.947222+00:00",
+        "data_shape": [
+          524288
+        ],
+        "data_dtype": "complex64",
+        "details": {
+          "analysis_complete": true
+        }
+      }
+    ],
+    "total_checkpoints": 4
+  },
+  "analysis_config": {
+    "sample_rate_hz": 1000000.0,
+    "center_freq_hz": 0.0,
+    "data_format": "complex64",
+    "fft_size": 4096,
+    "impedance_ohms": 50.0,
+    "digital_analysis": false,
+    "v3_analysis": false
+  },
+  "metrics": {
+    "sample_count": 524288,
+    "mean_complex": "(9.841599967330694e-05-2.9932823963463306e-05j)",
+    "std_dev": 0.008194031193852425,
+    "avg_power_dbm": -28.71906328233453,
+    "peak_power_dbm": -17.781706547772004,
+    "papr_db": 10.937356734562522,
+    "crest_factor": 3.5226365484751025,
+    "dc_offset": "(9.841599967330694e-05-2.9932823963463306e-05j)",
+    "iq_imbalance_db": -1.2740265000877524,
+    "snr_estimate_db": 0.0,
+    "bandwidth_estimate_hz": 866455.078125,
+    "center_freq_offset_hz": 3784.1796875
+  },
+  "anomalies": {
+    "dc_spike": false,
+    "saturation": false,
+    "dropout": false,
+    "periodic_interference": false,
+    "details": []
+  }
+}

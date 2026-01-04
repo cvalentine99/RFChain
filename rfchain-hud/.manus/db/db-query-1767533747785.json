@@ -1,0 +1,31 @@
+{
+  "query": "SELECT id, filename, s3Key, s3Url, status FROM signal_uploads ORDER BY id DESC LIMIT 3;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 321SQ8v7PaepPzJ.0f8ef369afb1 --database SXvF6ygASMGW5HtMdJT4My --execute SELECT id, filename, s3Key, s3Url, status FROM signal_uploads ORDER BY id DESC LIMIT 3;",
+  "rows": [
+    {
+      "id": "3",
+      "filename": "dumpBeforeFft(13).bin",
+      "s3Key": "signals/1/1767533557046-s8f6e3rs-dumpBeforeFft(13).bin",
+      "s3Url": "https://d2xsxph8kpxj0f.cloudfront.net/310519663246071970/SXvF6ygASMGW5HtMdJT4My/signals/1/1767533557046-s8f6e3rs-dumpBeforeFft(13).bin",
+      "status": "processing"
+    },
+    {
+      "id": "2",
+      "filename": "dumpBeforeFft(13).bin",
+      "s3Key": "signals/1/1767533328347-hti892xv-dumpBeforeFft(13).bin",
+      "s3Url": "https://d2xsxph8kpxj0f.cloudfront.net/310519663246071970/SXvF6ygASMGW5HtMdJT4My/signals/1/1767533328347-hti892xv-dumpBeforeFft(13).bin",
+      "status": "processing"
+    },
+    {
+      "id": "1",
+      "filename": "dumpBeforeFft (2).bin",
+      "s3Key": "signals/1/1767532741231-qvm35lpa-dumpBeforeFft (2).bin",
+      "s3Url": "https://d2xsxph8kpxj0f.cloudfront.net/310519663246071970/SXvF6ygASMGW5HtMdJT4My/signals/1/1767532741231-qvm35lpa-dumpBeforeFft (2).bin",
+      "status": "processing"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tfilename\ts3Key\ts3Url\tstatus\n3\tdumpBeforeFft(13).bin\tsignals/1/1767533557046-s8f6e3rs-dumpBeforeFft(13).bin\thttps://d2xsxph8kpxj0f.cloudfront.net/310519663246071970/SXvF6ygASMGW5HtMdJT4My/signals/1/1767533557046-s8f6e3rs-dumpBeforeFft(13).bin\tprocessing\n2\tdumpBeforeFft(13).bin\tsignals/1/1767533328347-hti892xv-dumpBeforeFft(13).bin\thttps://d2xsxph8kpxj0f.cloudfront.net/310519663246071970/SXvF6ygASMGW5HtMdJT4My/signals/1/1767533328347-hti892xv-dumpBeforeFft(13).bin\tprocessing\n1\tdumpBeforeFft (2).bin\tsignals/1/1767532741231-qvm35lpa-dumpBeforeFft (2).bin\thttps://d2xsxph8kpxj0f.cloudfront.net/310519663246071970/SXvF6ygASMGW5HtMdJT4My/signals/1/1767532741231-qvm35lpa-dumpBeforeFft (2).bin\tprocessing\n",
+  "stderr": "",
+  "execution_time_ms": 123
+}

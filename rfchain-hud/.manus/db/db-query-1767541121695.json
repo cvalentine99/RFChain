@@ -1,0 +1,18 @@
+{
+  "query": "SELECT id, signalId FROM analysis_results;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 321SQ8v7PaepPzJ.0f8ef369afb1 --database SXvF6ygASMGW5HtMdJT4My --execute SELECT id, signalId FROM analysis_results;",
+  "rows": [
+    {
+      "id": "1",
+      "signalId": "6"
+    },
+    {
+      "id": "2",
+      "signalId": "7"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tsignalId\n1\t6\n2\t7\n",
+  "stderr": "",
+  "execution_time_ms": 61
+}

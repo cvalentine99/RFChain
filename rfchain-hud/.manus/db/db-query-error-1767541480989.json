@@ -1,0 +1,8 @@
+{
+  "query": "SELECT id, analysisId, rawInputSha256, rawInputSha3, postMetricsSha256, postMetricsSha3, postAnomalySha256, postAnomalySha3 FROM forensic_reports LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 321SQ8v7PaepPzJ.0f8ef369afb1 --database SXvF6ygASMGW5HtMdJT4My --execute SELECT id, analysisId, rawInputSha256, rawInputSha3, postMetricsSha256, postMetricsSha3, postAnomalySha256, postAnomalySha3 FROM forensic_reports LIMIT 5;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'rawinputsha256' in 'field list'"
+  ]
+}

@@ -1,18 +1,26 @@
-// Preconfigured storage helpers for Manus WebDev templates
-// Uses the Biz-provided storage proxy (Authorization: Bearer <token>)
+// Storage helpers with local fallback for self-hosted deployments
+// Uses Manus storage proxy if configured, otherwise falls back to local filesystem
 
 import { ENV } from './_core/env';
+import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 
-type StorageConfig = { baseUrl: string; apiKey: string };
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Local storage directory (relative to project root)
+const LOCAL_STORAGE_DIR = path.join(__dirname, '..', 'storage_data');
+
+type StorageConfig = { baseUrl: string; apiKey: string } | null;
 
 function getStorageConfig(): StorageConfig {
   const baseUrl = ENV.forgeApiUrl;
   const apiKey = ENV.forgeApiKey;
 
   if (!baseUrl || !apiKey) {
-    throw new Error(
-      "Storage proxy credentials missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY"
-    );
+    // Return null to indicate local storage should be used
+    return null;
   }
 
   return { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey };
@@ -67,36 +75,103 @@ function buildAuthHeaders(apiKey: string): HeadersInit {
   return { Authorization: `Bearer ${apiKey}` };
 }
 
+// Local storage implementation
+function ensureLocalStorageDir(subPath: string): string {
+  const fullPath = path.join(LOCAL_STORAGE_DIR, path.dirname(subPath));
+  fs.mkdirSync(fullPath, { recursive: true });
+  return path.join(LOCAL_STORAGE_DIR, subPath);
+}
+
+async function localStoragePut(
+  relKey: string,
+  data: Buffer | Uint8Array | string
+): Promise<{ key: string; url: string }> {
+  const key = normalizeKey(relKey);
+  const filePath = ensureLocalStorageDir(key);
+  
+  // Convert data to Buffer if needed
+  const buffer = typeof data === 'string' 
+    ? Buffer.from(data) 
+    : Buffer.from(data);
+  
+  fs.writeFileSync(filePath, buffer);
+  
+  // Return a local URL that can be served by the static file server
+  const url = `/storage/${key}`;
+  
+  console.log(`[Storage] Saved locally: ${filePath} -> ${url}`);
+  return { key, url };
+}
+
+async function localStorageGet(relKey: string): Promise<{ key: string; url: string }> {
+  const key = normalizeKey(relKey);
+  const url = `/storage/${key}`;
+  return { key, url };
+}
+
 export async function storagePut(
   relKey: string,
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream"
 ): Promise<{ key: string; url: string }> {
-  const { baseUrl, apiKey } = getStorageConfig();
+  const config = getStorageConfig();
+  
+  // Use local storage if cloud storage is not configured
+  if (!config) {
+    console.log("[Storage] Using local filesystem storage");
+    return localStoragePut(relKey, data);
+  }
+  
+  // Use cloud storage (Manus S3 proxy)
+  const { baseUrl, apiKey } = config;
   const key = normalizeKey(relKey);
   const uploadUrl = buildUploadUrl(baseUrl, key);
   const formData = toFormData(data, contentType, key.split("/").pop() ?? key);
-  const response = await fetch(uploadUrl, {
-    method: "POST",
-    headers: buildAuthHeaders(apiKey),
-    body: formData,
-  });
+  
+  try {
+    const response = await fetch(uploadUrl, {
+      method: "POST",
+      headers: buildAuthHeaders(apiKey),
+      body: formData,
+    });
 
-  if (!response.ok) {
-    const message = await response.text().catch(() => response.statusText);
-    throw new Error(
-      `Storage upload failed (${response.status} ${response.statusText}): ${message}`
-    );
+    if (!response.ok) {
+      const message = await response.text().catch(() => response.statusText);
+      throw new Error(
+        `Storage upload failed (${response.status} ${response.statusText}): ${message}`
+      );
+    }
+    const url = (await response.json()).url;
+    return { key, url };
+  } catch (error) {
+    // Fall back to local storage on error
+    console.warn("[Storage] Cloud storage failed, falling back to local:", error);
+    return localStoragePut(relKey, data);
   }
-  const url = (await response.json()).url;
-  return { key, url };
 }
 
-export async function storageGet(relKey: string): Promise<{ key: string; url: string; }> {
-  const { baseUrl, apiKey } = getStorageConfig();
+export async function storageGet(relKey: string): Promise<{ key: string; url: string }> {
+  const config = getStorageConfig();
+  
+  // Use local storage if cloud storage is not configured
+  if (!config) {
+    return localStorageGet(relKey);
+  }
+  
+  const { baseUrl, apiKey } = config;
   const key = normalizeKey(relKey);
-  return {
-    key,
-    url: await buildDownloadUrl(baseUrl, key, apiKey),
-  };
+  
+  try {
+    return {
+      key,
+      url: await buildDownloadUrl(baseUrl, key, apiKey),
+    };
+  } catch (error) {
+    // Fall back to local storage on error
+    console.warn("[Storage] Cloud storage failed, falling back to local:", error);
+    return localStorageGet(relKey);
+  }
 }
+
+// Export local storage directory for static file serving
+export const STORAGE_DIR = LOCAL_STORAGE_DIR;

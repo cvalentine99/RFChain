@@ -1,7 +1,7 @@
 import { eq, desc, and, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { 
-  InsertUser, users,
+  InsertUser, users, User,
   signalUploads, InsertSignalUpload, SignalUpload,
   analysisResults, InsertAnalysisResult, AnalysisResult,
   forensicReports, InsertForensicReport, ForensicReport,
@@ -11,8 +11,11 @@ import {
   ragSettings, InsertRagSettings, RagSettings,
   batchJobs, InsertBatchJob, BatchJob,
   batchQueueItems, InsertBatchQueueItem, BatchQueueItem,
-  gpuBenchmarkHistory, InsertGpuBenchmarkHistory, GpuBenchmarkHistory
+  gpuBenchmarkHistory, InsertGpuBenchmarkHistory, GpuBenchmarkHistory,
+  sessions, InsertSession
 } from "../drizzle/schema";
+import * as bcrypt from "bcrypt";
+import * as crypto from "crypto";
 import { cosineSimilarity } from "./_core/embeddings";
 import { ENV } from './_core/env';
 
@@ -683,4 +686,166 @@ export async function getBenchmarkStats(userId: number): Promise<{
     bestSpeedup: maxSpeedups.length > 0 ? Math.max(...maxSpeedups) : null,
     lastRunDate: history[0].createdAt,
   };
+}
+
+
+// ============================================================================
+// Local Authentication
+// ============================================================================
+
+const SALT_ROUNDS = 12;
+const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+export async function createLocalUser(
+  username: string, 
+  password: string, 
+  name?: string, 
+  email?: string,
+  role: 'user' | 'admin' = 'user'
+): Promise<User | null> {
+  const db = await getDb();
+  if (!db) return null;
+  
+  // Check if username already exists
+  const existing = await db.select().from(users)
+    .where(eq(users.username, username))
+    .limit(1);
+  
+  if (existing.length > 0) {
+    throw new Error('Username already exists');
+  }
+  
+  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+  
+  const result = await db.insert(users).values({
+    username,
+    passwordHash,
+    name: name || username,
+    email,
+    loginMethod: 'local',
+    role,
+    lastSignedIn: new Date(),
+  });
+  
+  // Fetch and return the created user
+  const newUser = await db.select().from(users)
+    .where(eq(users.id, result[0].insertId))
+    .limit(1);
+  
+  return newUser[0] || null;
+}
+
+export async function verifyLocalUser(username: string, password: string): Promise<User | null> {
+  const db = await getDb();
+  if (!db) return null;
+  
+  const result = await db.select().from(users)
+    .where(eq(users.username, username))
+    .limit(1);
+  
+  if (result.length === 0) return null;
+  
+  const user = result[0];
+  if (!user.passwordHash) return null;
+  
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) return null;
+  
+  // Update last signed in
+  await db.update(users)
+    .set({ lastSignedIn: new Date() })
+    .where(eq(users.id, user.id));
+  
+  return user;
+}
+
+export async function getUserByUsername(username: string): Promise<User | null> {
+  const db = await getDb();
+  if (!db) return null;
+  
+  const result = await db.select().from(users)
+    .where(eq(users.username, username))
+    .limit(1);
+  
+  return result[0] || null;
+}
+
+export async function createSession(userId: number): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  
+  const token = crypto.randomBytes(64).toString('hex');
+  const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
+  
+  await db.insert(sessions).values({
+    userId,
+    token,
+    expiresAt,
+  });
+  
+  return token;
+}
+
+export async function validateSession(token: string): Promise<User | null> {
+  const db = await getDb();
+  if (!db) return null;
+  
+  const result = await db.select().from(sessions)
+    .where(eq(sessions.token, token))
+    .limit(1);
+  
+  if (result.length === 0) return null;
+  
+  const session = result[0];
+  
+  // Check if session expired
+  if (new Date() > session.expiresAt) {
+    await db.delete(sessions).where(eq(sessions.id, session.id));
+    return null;
+  }
+  
+  // Get user
+  const userResult = await db.select().from(users)
+    .where(eq(users.id, session.userId))
+    .limit(1);
+  
+  return userResult[0] || null;
+}
+
+export async function deleteSession(token: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  
+  await db.delete(sessions).where(eq(sessions.token, token));
+}
+
+export async function deleteUserSessions(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  
+  await db.delete(sessions).where(eq(sessions.userId, userId));
+}
+
+export async function changePassword(userId: number, newPassword: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  
+  await db.update(users)
+    .set({ passwordHash })
+    .where(eq(users.id, userId));
+  
+  // Invalidate all sessions
+  await deleteUserSessions(userId);
+  
+  return true;
+}
+
+export async function getUserCount(): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  
+  const result = await db.select({ count: sql<number>`count(*)` }).from(users);
+  return result[0]?.count || 0;
 }

@@ -1,9 +1,11 @@
-# RFChain HUD - Local Deployment Guide
+# RFChain HUD - Self-Hosted Deployment Guide
 
-**Version:** 1.2  
+**Version:** 2.0 (Self-Hosted)  
 **Target Platform:** Lubuntu 24.04 LTS  
 **Author:** Manus AI  
 **Last Updated:** January 2026
+
+> **FORENSIC COMPLIANCE**: This version is designed for **fully self-hosted** operation with **no external cloud dependencies**. All data, authentication, and processing stays on your local machine.
 
 ---
 
@@ -143,12 +145,24 @@ nano .env.local
 | `JWT_SECRET` | Session encryption key | Generate with `openssl rand -base64 32` |
 | `ANTHROPIC_API_KEY` | API key for JARVIS chat | Your Anthropic API key |
 
-### Step 5: Initialize the Database
+### Step 5: Set Up MySQL Database
 
-The application uses SQLite for local storage. Initialize the database schema:
+RFChain HUD uses MySQL for robust data storage. Run the setup script:
 
 ```bash
-npm run db:push
+./deploy/setup-mysql.sh
+```
+
+This script will:
+- Install MySQL if not present
+- Create the `rfchain_hud` database
+- Create the `rfchain` user with a password you specify
+- Generate `.env.local` with your configuration
+
+Then run the database migration:
+
+```bash
+pnpm db:push
 ```
 
 ### Step 6: Build for Production
@@ -219,22 +233,32 @@ rfchain-hud/
 
 ### JARVIS AI Assistant
 
-The JARVIS chat assistant requires an LLM API key. Configure one of the following options in `.env.local`:
+The JARVIS chat assistant requires an LLM backend. For **forensic compliance**, we recommend using a local LLM.
 
-**Option 1: Anthropic Claude (Recommended)**
+**Option 1: Local LLM via Ollama (RECOMMENDED for Forensic Use)**
+
+Ollama runs completely offline on your machine:
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull a model (llama3 recommended)
+ollama pull llama3
+
+# Add to .env.local:
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=llama3
+```
+
+**Option 2: Anthropic Claude (Cloud - requires internet)**
 ```
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-**Option 2: OpenAI GPT**
+**Option 3: OpenAI GPT (Cloud - requires internet)**
 ```
 OPENAI_API_KEY=sk-...
-```
-
-**Option 3: Local LLM (Ollama)**
-```
-LOCAL_LLM_URL=http://localhost:11434
-LOCAL_LLM_MODEL=llama3.2
 ```
 
 ### Voice Input (Whisper)
@@ -469,12 +493,34 @@ npm run build
 
 ## Security Considerations
 
-For local deployment, consider the following security practices:
+### For Forensic Use
+
+1. **Network Isolation**: Run on an air-gapped network if required for chain-of-custody
+2. **Use Ollama**: Ensures all AI processing stays local (no data leaves your machine)
+3. **Disable External Services**: Leave cloud API keys empty in `.env.local`
+4. **Local Authentication**: The app uses local username/password authentication stored in MySQL (no external OAuth)
+5. **First User = Admin**: The first user to register becomes the administrator
+
+### General Security
 
 1. **Generate a strong JWT secret** using `openssl rand -base64 32`
-2. **Keep API keys secure** - never commit `.env.local` to version control
-3. **Firewall configuration** - if exposing to network, configure firewall rules
+2. **Keep credentials secure** - never commit `.env.local` to version control
+3. **Firewall configuration** - restrict access to localhost only:
+   ```bash
+   sudo ufw allow from 127.0.0.1 to any port 3007
+   sudo ufw enable
+   ```
 4. **Regular updates** - keep Node.js, Python, and dependencies updated
+5. **Database backups** - regularly backup MySQL and the `uploads/` directory
+
+### Authentication
+
+RFChain HUD uses **local authentication** by default:
+- Username/password stored in MySQL with bcrypt hashing
+- JWT session tokens (7-day expiry)
+- No external OAuth dependencies
+- First registered user automatically becomes admin
+- Admins can create additional users
 
 ---
 

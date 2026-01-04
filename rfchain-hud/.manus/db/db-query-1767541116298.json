@@ -1,0 +1,24 @@
+{
+  "query": "SELECT id, signalId, userId, sampleCount, createdAt FROM analysis_results ORDER BY id DESC LIMIT 5;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 321SQ8v7PaepPzJ.0f8ef369afb1 --database SXvF6ygASMGW5HtMdJT4My --execute SELECT id, signalId, userId, sampleCount, createdAt FROM analysis_results ORDER BY id DESC LIMIT 5;",
+  "rows": [
+    {
+      "id": "2",
+      "signalId": "7",
+      "userId": "1",
+      "sampleCount": "524288",
+      "createdAt": "2026-01-04 13:56:35"
+    },
+    {
+      "id": "1",
+      "signalId": "6",
+      "userId": "1",
+      "sampleCount": "524288",
+      "createdAt": "2026-01-04 13:50:13"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tsignalId\tuserId\tsampleCount\tcreatedAt\n2\t7\t1\t524288\t2026-01-04 13:56:35\n1\t6\t1\t524288\t2026-01-04 13:50:13\n",
+  "stderr": "",
+  "execution_time_ms": 80
+}
