@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, List, Dict, Any, Union, Callable
 from enum import Enum
 from collections import Counter
 from math import log2, gcd
@@ -79,6 +79,30 @@ AUTOCORR_PEAK_DISTANCE = 10  # Minimum distance between autocorr peaks
 SATURATION_THRESHOLD = 0.99  # Signal saturation detection threshold
 DROPOUT_THRESHOLD = 0.01  # Signal dropout detection threshold
 MEMORY_USAGE_WARNING = 0.8  # Warn if file size exceeds this fraction of available RAM
+
+# =============================================================================
+# GPU/CPU COMPATIBILITY HELPERS
+# =============================================================================
+
+def to_numpy(arr):
+    """Convert array to NumPy, handling both CuPy and NumPy arrays."""
+    if GPU_AVAILABLE and hasattr(arr, 'get'):
+        return arr.get()
+    return np.asarray(arr)
+
+def to_scalar(val):
+    """Convert a GPU/CPU scalar to Python scalar."""
+    if GPU_AVAILABLE and hasattr(val, 'get'):
+        return val.get()
+    if hasattr(val, 'item'):
+        return val.item()
+    return val
+
+def cp_asnumpy(arr):
+    """Safe wrapper for cp.asnumpy that works in CPU mode."""
+    if GPU_AVAILABLE:
+        return cp_asnumpy(arr)
+    return np.asarray(arr)
 
 # =============================================================================
 # FORENSIC COMPLIANCE MODULE (Added for NIST/SWGDE/ISO 27037 compliance)
@@ -357,7 +381,7 @@ def validate_gpu_against_cpu(gpu_result: cp.ndarray, cpu_func: Callable,
         Dictionary containing validation results and environment info
     """
     cpu_result = cpu_func(input_data)
-    gpu_result_cpu = cp.asnumpy(gpu_result)
+    gpu_result_cpu = cp_asnumpy(gpu_result)
     
     max_diff = float(np.max(np.abs(gpu_result_cpu - cpu_result)))
     mean_diff = float(np.mean(np.abs(gpu_result_cpu - cpu_result)))
@@ -450,7 +474,7 @@ def compute_psd_forensic(signal: cp.ndarray, fs: float, nfft: int,
         'enbw_corrected': True
     }
     
-    return freqs, cp.asnumpy(psd), metadata
+    return freqs, cp_asnumpy(psd), metadata
 
 
 # -----------------------------------------------------------------------------
@@ -556,7 +580,7 @@ class ForensicPipeline:
         """
         # Convert CuPy array to NumPy if needed
         if hasattr(data, 'get'):
-            data_np = data.get()
+            data_np = to_numpy(data)
         else:
             data_np = data
         
@@ -885,14 +909,21 @@ class AnalysisConfig:
 
 @contextmanager
 def gpu_memory_pool():
-    """Context manager for GPU memory management."""
-    mempool = cp.get_default_memory_pool()
-    pinned_mempool = cp.get_default_pinned_memory_pool()
-    try:
+    """Context manager for GPU memory management.
+    
+    In CPU-only mode (when CuPy is not available), this is a no-op.
+    """
+    if GPU_AVAILABLE:
+        mempool = cp.get_default_memory_pool()
+        pinned_mempool = cp.get_default_pinned_memory_pool()
+        try:
+            yield
+        finally:
+            mempool.free_all_blocks()
+            pinned_mempool.free_all_blocks()
+    else:
+        # CPU mode - no memory pool management needed
         yield
-    finally:
-        mempool.free_all_blocks()
-        pinned_mempool.free_all_blocks()
 
 
 class SignalLoader:
@@ -1098,8 +1129,8 @@ class FFTDebugAnalyzer:
         peak_freq = float(freqs[peak_idx])
         noise_floor = float(cp.median(X_db))
 
-        X_db_np = cp.asnumpy(X_db)
-        freqs_np = cp.asnumpy(freqs)
+        X_db_np = cp_asnumpy(X_db)
+        freqs_np = cp_asnumpy(freqs)
         spur_threshold = noise_floor + abs(threshold_db)
 
         spurs = []
@@ -1240,7 +1271,7 @@ class MSequenceAnalyzer:
         autocorr = autocorr[len(autocorr)//2:]
         autocorr = autocorr / (autocorr[0] + 1e-10)
 
-        autocorr_np = cp.asnumpy(autocorr[:max_period])
+        autocorr_np = cp_asnumpy(autocorr[:max_period])
 
         try:
             peaks, _ = find_peaks(autocorr_np[10:], height=0.5, distance=10)
@@ -1358,7 +1389,7 @@ class SpreadingCodeAnalyzer:
         autocorr = autocorr[len(autocorr)//2:]
         autocorr = autocorr / (autocorr[0] + 1e-10)
 
-        autocorr_np = cp.asnumpy(autocorr[:int(self.fs / 1000)])
+        autocorr_np = cp_asnumpy(autocorr[:int(self.fs / 1000)])
 
         try:
             inverted = -autocorr_np
@@ -1730,14 +1761,14 @@ class SignalAnalyzer:
             metrics.sample_count = n
             
             # Basic statistics
-            metrics.mean_complex = complex(cp.mean(data).get())
-            metrics.std_dev = float(cp.std(data).get())
+            metrics.mean_complex = complex(to_scalar(cp.mean(data)))
+            metrics.std_dev = float(to_scalar(cp.std(data)))
             metrics.dc_offset = metrics.mean_complex
             
             # Power calculations
             power = cp.abs(data) ** 2
-            metrics.avg_power_linear = float(cp.mean(power).get())
-            metrics.peak_power_linear = float(cp.max(power).get())
+            metrics.avg_power_linear = float(to_scalar(cp.mean(power)))
+            metrics.peak_power_linear = float(to_scalar(cp.max(power)))
             
             # Convert to dBm (assuming 50 ohm impedance, voltage units)
             # P_dBm = 10*log10(V^2/R) + 30
@@ -1756,8 +1787,8 @@ class SignalAnalyzer:
                     metrics.peak_power_linear / metrics.avg_power_linear)
             
             # I/Q Imbalance estimation
-            i_power = float(cp.mean(cp.abs(data.real) ** 2).get())
-            q_power = float(cp.mean(cp.abs(data.imag) ** 2).get())
+            i_power = float(to_scalar(cp.mean(cp.abs(data.real) ** 2)))
+            q_power = float(to_scalar(cp.mean(cp.abs(data.imag) ** 2)))
             if q_power > 0:
                 metrics.iq_imbalance_db = 10 * np.log10(i_power / q_power)
             
@@ -1778,11 +1809,11 @@ class SignalAnalyzer:
 
             # Avoid division by zero
             m2_sq = m2 ** 2
-            if float(m2_sq.get()) < 1e-20:
+            if float(to_scalar(m2_sq)) < 1e-20:
                 return 0.0
 
             # M2M4 estimator
-            k = float((m4 / m2_sq).get())
+            k = float(to_scalar(m4 / m2_sq))
 
             # For complex Gaussian noise, k ≈ 2
             # For signal + noise, we can estimate SNR
@@ -1806,7 +1837,7 @@ class SignalAnalyzer:
             psd_normalized = psd / cp.sum(psd)
             
             # Cumulative power
-            cumsum = cp.cumsum(psd_normalized).get()
+            cumsum = to_numpy(cp.cumsum(psd_normalized))
             
             # Find 0.5% and 99.5% points (99% bandwidth)
             low_idx = np.searchsorted(cumsum, 0.005)
@@ -1827,7 +1858,7 @@ class SignalAnalyzer:
                          source_name: str = ""):
         """Generate I/Q time domain plot with envelope."""
         n_samples = min(len(data), self.config.time_domain_samples)
-        subset = cp.asnumpy(data[:n_samples])
+        subset = cp_asnumpy(data[:n_samples])
 
         time_us = np.arange(n_samples) / self.config.sample_rate * 1e6
         envelope = np.abs(subset)
@@ -1884,12 +1915,12 @@ class SignalAnalyzer:
                     psd_accum += cp.abs(cp.fft.fft(windowed)) ** 2
                 
                 # FORENSIC FIX: Apply ENBW correction
-                enbw = compute_enbw(cp.asnumpy(window))
+                enbw = compute_enbw(cp_asnumpy(window))
                 
                 spectrum = cp.fft.fftshift(psd_accum / n_segments)
             
             magnitude_db = 10 * cp.log10(cp.abs(spectrum) + 1e-12)
-            mag_cpu = cp.asnumpy(magnitude_db)
+            mag_cpu = cp_asnumpy(magnitude_db)
         
         freqs = np.linspace(-self.config.sample_rate/2, 
                            self.config.sample_rate/2, 
@@ -1920,7 +1951,7 @@ class SignalAnalyzer:
         """Generate high-resolution spectrogram."""
         # Limit data size for spectrogram to avoid memory issues
         max_samples = int(self.config.sample_rate * 10)  # 10 seconds max
-        data_limited = cp.asnumpy(data[:max_samples])
+        data_limited = cp_asnumpy(data[:max_samples])
         
         nfft = self.config.spectrogram_nfft
         noverlap = int(nfft * self.config.spectrogram_overlap)
@@ -1971,7 +2002,7 @@ class SignalAnalyzer:
                 spectrum = cp.fft.fftshift(cp.fft.fft(frame * window))
                 waterfall[i, :] = 20 * cp.log10(cp.abs(spectrum) + 1e-12)
             
-            waterfall_cpu = cp.asnumpy(waterfall)
+            waterfall_cpu = cp_asnumpy(waterfall)
         
         fig, ax = plt.subplots(figsize=(14, 8))
         
@@ -1998,7 +2029,7 @@ class SignalAnalyzer:
                            source_name: str = ""):
         """Generate constellation diagram with density visualization."""
         n = min(len(data), self.config.constellation_max_points)
-        subset = cp.asnumpy(data[:n])
+        subset = cp_asnumpy(data[:n])
         
         i_data = subset.real
         q_data = subset.imag
@@ -2040,7 +2071,7 @@ class SignalAnalyzer:
             
             # Instantaneous phase (unwrapped)
             phase = cp.angle(subset)
-            phase_unwrapped = cp.asnumpy(phase)
+            phase_unwrapped = cp_asnumpy(phase)
             phase_unwrapped = np.unwrap(phase_unwrapped)
             
             # Instantaneous frequency (derivative of phase)
@@ -2089,7 +2120,7 @@ class SignalAnalyzer:
             # Extract center region
             center = n_fft // 2
             span = min(500, n // 2)
-            acf_cpu = cp.asnumpy(autocorr_mag[center - span:center + span])
+            acf_cpu = cp_asnumpy(autocorr_mag[center - span:center + span])
         
         lags = np.arange(-span, span)
         lag_time_us = lags / self.config.sample_rate * 1e6
@@ -2141,7 +2172,7 @@ class SignalAnalyzer:
                 scd += cp.outer(X1, cp.conj(X2))
             
             scd = cp.fft.fftshift(cp.abs(scd)) / n_frames
-            scd_cpu = cp.asnumpy(scd)
+            scd_cpu = cp_asnumpy(scd)
         
         fig, ax = plt.subplots(figsize=(10, 10))
         
@@ -2161,7 +2192,7 @@ class SignalAnalyzer:
     def plot_statistics(self, data: cp.ndarray, filename: str = "09_statistics.png",
                         source_name: str = ""):
         """Generate comprehensive statistical visualizations."""
-        subset = cp.asnumpy(data[:min(len(data), 500000)])
+        subset = cp_asnumpy(data[:min(len(data), 500000)])
         
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
         
@@ -2216,7 +2247,7 @@ class SignalAnalyzer:
         with gpu_memory_pool():
             # Short-term power (instantaneous)
             n_short = min(len(data), self.config.time_domain_samples)
-            power_short = cp.asnumpy(cp.abs(data[:n_short]) ** 2)
+            power_short = cp_asnumpy(cp.abs(data[:n_short]) ** 2)
             
             # Long-term power (windowed average)
             window_size = 1000
@@ -2226,7 +2257,7 @@ class SignalAnalyzer:
             # Moving average on GPU
             kernel = cp.ones(window_size) / window_size
             power_avg = cp.convolve(power_inst, kernel, mode='valid')
-            power_avg_cpu = cp.asnumpy(power_avg)
+            power_avg_cpu = cp_asnumpy(power_avg)
         
         fig, axes = plt.subplots(2, 1, figsize=(14, 8))
         
@@ -2257,7 +2288,7 @@ class SignalAnalyzer:
                          filename: str = "11_eye_diagram.png", source_name: str = ""):
         """Generate eye diagram for digital signal analysis."""
         n = min(len(data), 50000)
-        subset = cp.asnumpy(data[:n])
+        subset = cp_asnumpy(data[:n])
         
         # Calculate number of complete symbols
         n_symbols = n // samples_per_symbol - 2
@@ -2316,10 +2347,10 @@ class SignalAnalyzer:
             if dc_component > 0.1 * rms:
                 anomalies['dc_spike'] = True
                 anomalies['details'].append(
-                    f"DC offset detected: {float(dc_component.get()):.4f}")
+                    f"DC offset detected: {float(to_scalar(dc_component)):.4f}")
             
             # Saturation detection (clipping)
-            max_val = float(cp.max(cp.abs(data)).get())
+            max_val = float(to_scalar(cp.max(cp.abs(data))))
             if max_val > 0.99:
                 anomalies['saturation'] = True
                 anomalies['details'].append(
@@ -2327,9 +2358,9 @@ class SignalAnalyzer:
             
             # Dropout detection (zero regions)
             power = cp.abs(data) ** 2
-            avg_power = float(cp.mean(power).get())
+            avg_power = float(to_scalar(cp.mean(power)))
             threshold = avg_power * 0.001
-            low_power_samples = int(cp.sum(power < threshold).get())
+            low_power_samples = int(to_scalar(cp.sum(power < threshold)))
             if low_power_samples > len(data) * 0.01:
                 anomalies['dropout'] = True
                 anomalies['details'].append(
@@ -2348,7 +2379,7 @@ class SignalAnalyzer:
         Returns:
             (is_binary, unique_levels, active_channel, level_low, level_high)
         """
-        data_np = cp.asnumpy(data[:min(len(data), 100000)])
+        data_np = cp_asnumpy(data[:min(len(data), 100000)])
 
         i_vals = data_np.real
         q_vals = data_np.imag
@@ -2406,7 +2437,7 @@ class SignalAnalyzer:
         if block_sizes is None:
             block_sizes = [256, 512, 1024, 2048, 4096]
 
-        data_np = cp.asnumpy(data[:min(len(data), 500000)])
+        data_np = cp_asnumpy(data[:min(len(data), 500000)])
 
         # Use magnitude or active channel
         if np.mean(np.abs(data_np.real) ** 2) < 1e-10:
@@ -2464,7 +2495,7 @@ class SignalAnalyzer:
         """
         Threshold demodulation to extract binary data.
         """
-        data_np = cp.asnumpy(data)
+        data_np = cp_asnumpy(data)
 
         # Determine which channel to use
         if np.mean(np.abs(data_np.real) ** 2) < 1e-10:
@@ -2789,7 +2820,7 @@ class SignalAnalyzer:
                              filename: str, source_name: str = "",
                              block_results: Optional[Dict] = None):
         """Generate digital signal analysis visualization."""
-        data_np = cp.asnumpy(data[:min(len(data), 5000)])
+        data_np = cp_asnumpy(data[:min(len(data), 5000)])
 
         # Get signal for plotting
         if analysis.active_channel == "Q":
@@ -2925,7 +2956,7 @@ class SignalAnalyzer:
     def analyze_bit_ordering(self, data: cp.ndarray) -> BitOrderMetrics:
         """Run bit ordering and frame analysis."""
         # First demodulate to bits
-        data_np = cp.asnumpy(data)
+        data_np = cp_asnumpy(data)
         signal, _ = self._get_active_signal(data_np)
 
         threshold = np.mean(signal)
@@ -2939,7 +2970,7 @@ class SignalAnalyzer:
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
         fig.suptitle(f'FFT Pipeline Debug: {source_name}', fontsize=14, fontweight='bold')
 
-        data_np = cp.asnumpy(data[:self.config.fft_size * 4])
+        data_np = cp_asnumpy(data[:self.config.fft_size * 4])
         fs = self.config.sample_rate
         fft_size = self.config.fft_size
 
@@ -3013,7 +3044,7 @@ class SignalAnalyzer:
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
         fig.suptitle(f'Spreading Code Analysis: {source_name}', fontsize=14, fontweight='bold')
 
-        data_np = cp.asnumpy(data[:50000])
+        data_np = cp_asnumpy(data[:50000])
         signal = np.sign(np.real(data_np))
 
         # Panel 1: Autocorrelation
@@ -3074,7 +3105,7 @@ class SignalAnalyzer:
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
         fig.suptitle(f'Bit/Frame Analysis: {source_name}', fontsize=14, fontweight='bold')
 
-        data_np = cp.asnumpy(data[:100000])
+        data_np = cp_asnumpy(data[:100000])
         signal, _ = self._get_active_signal(data_np)
 
         threshold = np.mean(signal)
@@ -3431,6 +3462,7 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     # Check GPU availability (Issue 5 Fix: Don't exit, use CPU fallback)
+    global GPU_AVAILABLE
     if GPU_AVAILABLE:
         try:
             device = cp.cuda.Device(0)

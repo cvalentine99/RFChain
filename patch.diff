@@ -1,0 +1,588 @@
+diff --git a/analyze_signal_v2.2.2_forensic.py b/analyze_signal_v2.2.2_forensic.py
+index fdf8358f866a112dfc43b009c46ea6fde800dc6b..a3941f717cc8de3ad9bfe0bfffc4e9c7ba0513d3 100644
+--- a/analyze_signal_v2.2.2_forensic.py
++++ b/analyze_signal_v2.2.2_forensic.py
+@@ -13,64 +13,62 @@ Features:
+ - Memory-efficient chunked processing
+ - Digital signal analysis (--digital):
+   - Binary signal detection and demodulation
+   - Block structure and inversion pattern detection
+   - Encoding type identification (NRZ, NRZ-I, etc.)
+   - Sync pattern and HDLC frame extraction
+   - Byte-level analysis with entropy calculation
+ - V3 Enhanced analysis (--v3):
+   - FFT pipeline debug (DC offset, spectral leakage, spurs)
+   - PN sequence / spreading code detection (M-seq, Gold codes)
+   - Bit ordering & frame analysis (scramblers, sync words)
+ """
+ 
+ import numpy as np
+ # Issue 5 Fix: GPU fallback mode - use NumPy when CuPy unavailable
+ try:
+     import cupy as cp
+     GPU_AVAILABLE = True
+ except ImportError:
+     import numpy as cp  # Fallback to NumPy
+     GPU_AVAILABLE = False
+ import matplotlib.pyplot as plt
+ from matplotlib.colors import LogNorm
+ from pathlib import Path
+ from dataclasses import dataclass, field
+-from typing import Optional, Tuple, List, Dict, Any
++from typing import Optional, Tuple, List, Dict, Any, Union
+ from enum import Enum
+ from collections import Counter
+-from math import log2, gcd
+-from functools import reduce
++from math import log2
+ import argparse
+ import logging
+ import sys
+ import json
+ from datetime import datetime
+ from contextlib import contextmanager
+ import warnings
+ import hashlib
+-import os
+ from scipy.signal import find_peaks, welch
+ 
+ # Suppress matplotlib font warnings
+ warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+ 
+ # =============================================================================
+ # EARLY DEFINITIONS (Required before forensic module)
+ # Issue 1 Fix: Move constants and logging before forensic compliance module
+ # =============================================================================
+ 
+ # Configure logging early (needed by forensic module)
+ log = logging.getLogger(__name__)
+ log.setLevel(logging.INFO)
+ if not log.handlers:
+     handler = logging.StreamHandler(sys.stdout)
+     handler.setLevel(logging.INFO)
+     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+     handler.setFormatter(formatter)
+     log.addHandler(handler)
+ 
+ # Constants needed by forensic module
+ HASH_CHUNK_SIZE = 65536  # Chunk size for file hashing (64KB)
+ 
+ # Issue 11 Fix: Named constants for magic numbers (forensic thresholds)
+ DC_SPIKE_THRESHOLD = 0.1  # DC component threshold relative to RMS
+@@ -101,452 +99,127 @@ def compute_forensic_hashes(filepath: Path) -> Dict[str, str]:
+     
+     Args:
+         filepath: The path to the file to be hashed.
+         
+     Returns:
+         A dictionary containing the SHA-256 hash, the SHA3-256 hash, and the UTC timestamp.
+     """
+     if not filepath.is_file():
+         raise FileNotFoundError(f"File not found at: {filepath}")
+ 
+     sha256_hash = hashlib.sha256()
+     sha3_256_hash = hashlib.sha3_256()
+     
+     with open(filepath, "rb") as f:
+         while chunk := f.read(HASH_CHUNK_SIZE):
+             sha256_hash.update(chunk)
+             sha3_256_hash.update(chunk)
+ 
+     return {
+         'sha256': sha256_hash.hexdigest(),
+         'sha3_256': sha3_256_hash.hexdigest(),
+         'hash_timestamp_utc': datetime.now(timezone.utc).isoformat()
+     }
+ 
+ 
+-# -----------------------------------------------------------------------------
+-# Issue 3 Fix: Residual Byte Preservation (Chain of Custody Compliance)
+-# -----------------------------------------------------------------------------
+-
+-def load_with_residual_preservation(raw_bytes: bytes, sample_size: int) -> Tuple[np.ndarray, Dict[str, Any]]:
+-    """
+-    Loads signal data from a raw byte stream, preserving trailing (residual) bytes
+-    that do not form a complete sample.
+-    
+-    This function is designed to comply with forensic best practices (NIST SP 800-86,
+-    SWGDE) by preventing silent data truncation. Instead of discarding incomplete
+-    samples, it separates them, computes a cryptographic hash for integrity verification,
+-    and returns them in a metadata dictionary.
+-    
+-    Args:
+-        raw_bytes: The raw byte stream read from the signal file.
+-        sample_size: The number of bytes that constitute a single complete sample.
+-        
+-    Returns:
+-        Tuple containing:
+-        - A NumPy array of complete samples
+-        - A dictionary containing metadata about the residual bytes
+-    """
+-    num_bytes = len(raw_bytes)
+-    num_complete_samples = num_bytes // sample_size
+-    num_residual_bytes = num_bytes % sample_size
+-
+-    complete_samples_bytes = raw_bytes[:num_complete_samples * sample_size]
+-    samples = np.frombuffer(complete_samples_bytes, dtype=np.complex64)
+-
+-    residual_metadata = {'residual_bytes': 0, 'action': 'none_required'}
+-    if num_residual_bytes > 0:
+-        residual_bytes = raw_bytes[num_complete_samples * sample_size:]
+-        residual_hash = hashlib.sha256(residual_bytes).hexdigest()
+-        residual_metadata = {
+-            'residual_bytes': num_residual_bytes,
+-            'residual_bytes_hex': residual_bytes.hex(),
+-            'residual_hash_sha256': residual_hash,
+-            'action': 'preserved_not_truncated'
+-        }
+-        log.warning(f"FORENSIC: {num_residual_bytes} residual bytes preserved separately")
+-
+-    return samples, residual_metadata
+-
+-
+-# -----------------------------------------------------------------------------
+-# Issue 4 Fix: Parseval's Theorem Verification (FFT Integrity)
+-# -----------------------------------------------------------------------------
+-
+-def verify_parseval(time_signal: cp.ndarray, freq_signal: cp.ndarray, 
+-                    tolerance: float = 1e-6) -> Dict[str, Any]:
+-    """
+-    Verifies the integrity of an FFT operation using Parseval's theorem.
+-    
+-    Parseval's theorem states that the total energy of a signal in the time domain
+-    is equal to its total energy in the frequency domain:
+-    Σ|x[n]|² = (1/N)Σ|X[k]|²
+-    
+-    Any discrepancy indicates processing error or data corruption.
+-    
+-    Args:
+-        time_signal: The input signal in the time domain (GPU array)
+-        freq_signal: The FFT of the time_signal (GPU array)
+-        tolerance: The acceptable tolerance for the energy difference
+-        
+-    Returns:
+-        Dictionary containing verification results
+-    """
+-    N = len(time_signal)
+-    if N == 0:
+-        return {
+-            'verification_passed': False,
+-            'time_domain_energy': 0.0,
+-            'freq_domain_energy': 0.0,
+-            'relative_error': float('inf'),
+-            'tolerance': tolerance,
+-            'message': "Error: Time domain signal is empty."
+-        }
+-    
+-    time_domain_energy = float(cp.sum(cp.abs(time_signal) ** 2))
+-    freq_domain_energy = float(cp.sum(cp.abs(freq_signal) ** 2) / N)
+-    
+-    relative_error = abs(time_domain_energy - freq_domain_energy) / (time_domain_energy + EPSILON_SMALL)
+-    passed = relative_error < tolerance
+-    
+-    if not passed:
+-        log.error(f"FORENSIC ALERT: Parseval verification FAILED (error: {relative_error:.2e})")
+-    
+-    return {
+-        'verification_passed': passed,
+-        'time_domain_energy': time_domain_energy,
+-        'freq_domain_energy': freq_domain_energy,
+-        'relative_error': relative_error,
+-        'tolerance': tolerance
+-    }
+-
+-
+ # -----------------------------------------------------------------------------
+ # Issue 5 Fix: CFAR Adaptive Thresholds (Forensic Detection)
+ # -----------------------------------------------------------------------------
+ 
+ def estimate_noise_power(signal: cp.ndarray, num_guard: int, num_train: int) -> float:
+     """Estimate noise power from training cells for CFAR."""
+     signal_abs = cp.abs(signal)
+     # Use median-based noise estimation for robustness
+     sorted_signal = cp.sort(signal_abs)
+     # Exclude top values (potential signals) and use lower portion for noise estimate
+     noise_samples = sorted_signal[:len(sorted_signal) // 2]
+     return float(cp.mean(noise_samples ** 2))
+ 
+ 
+ def compute_cfar_threshold(signal: cp.ndarray, pfa: float = 1e-6,
+                            num_guard: int = 2, num_train: int = 16) -> Tuple[float, Dict[str, Any]]:
+     """
+     Compute CFAR threshold for specified false alarm probability.
+     
+     Uses CA-CFAR (Cell-Averaging CFAR): T = α · P̂_n where α = N·(P_FA^{-1/N} - 1)
+     
+     This is mandatory for forensic validity as fixed thresholds cannot maintain
+     consistent false alarm rates across varying noise conditions.
+     
+     Args:
+         signal: Input signal array
+         pfa: Desired probability of false alarm
+         num_guard: Number of guard cells
+         num_train: Number of training cells
+         
+     Returns:
+         Tuple of (threshold value, metadata dictionary)
+     """
+     N = num_train
+     alpha = N * (pfa ** (-1/N) - 1)
+     
+     noise_estimate = estimate_noise_power(signal, num_guard, num_train)
+     threshold = alpha * noise_estimate
+     
+     return float(threshold), {
+         'method': 'CA-CFAR',
+         'pfa_specified': pfa,
+         'alpha': float(alpha),
+         'noise_estimate': float(noise_estimate),
+         'num_guard_cells': num_guard,
+         'num_training_cells': num_train
+     }
+ 
+ 
+-# -----------------------------------------------------------------------------
+-# Issue 6 Fix: Chain of Custody Logging (NIST SP 800-86, ISO/IEC 27037)
+-# -----------------------------------------------------------------------------
+-
+-@dataclass
+-class CustodyEntry:
+-    """Single entry in the chain of custody log."""
+-    handler_id: str
+-    handler_organization: str
+-    timestamp_utc: str
+-    action: str  # 'acquired', 'examined', 'processed', 'transferred'
+-    hash_before: str
+-    hash_after: str
+-    notes: str = ""
+-
+-
+-class ChainOfCustody:
+-    """
+-    Manages chain of custody logging for forensic evidence.
+-    
+-    Tracks each person who handled the evidence, the date/time it was collected
+-    or transferred, and the purpose for the transfer, as required by NIST SP 800-86
+-    and ISO/IEC 27037.
+-    """
+-    
+-    def __init__(self, evidence_id: str):
+-        self.evidence_id = evidence_id
+-        self.entries: List[CustodyEntry] = []
+-        self.created_utc = datetime.now(timezone.utc).isoformat()
+-    
+-    def add_entry(self, handler_id: str, org: str, action: str,
+-                  hash_before: str, hash_after: str, notes: str = "") -> None:
+-        """Add a new custody entry."""
+-        entry = CustodyEntry(
+-            handler_id=handler_id,
+-            handler_organization=org,
+-            timestamp_utc=datetime.now(timezone.utc).isoformat(),
+-            action=action,
+-            hash_before=hash_before,
+-            hash_after=hash_after,
+-            notes=notes
+-        )
+-        self.entries.append(entry)
+-        log.info(f"CUSTODY: {action} by {handler_id}@{org}")
+-    
+-    def to_dict(self) -> Dict[str, Any]:
+-        """Export custody chain as dictionary."""
+-        return {
+-            'evidence_id': self.evidence_id,
+-            'created_utc': self.created_utc,
+-            'entries': [
+-                {
+-                    'handler_id': e.handler_id,
+-                    'handler_organization': e.handler_organization,
+-                    'timestamp_utc': e.timestamp_utc,
+-                    'action': e.action,
+-                    'hash_before': e.hash_before,
+-                    'hash_after': e.hash_after,
+-                    'notes': e.notes
+-                }
+-                for e in self.entries
+-            ]
+-        }
+-
+-
+-# -----------------------------------------------------------------------------
+-# Issue 7 Fix: GPU vs CPU Reference Validation (Phase 14 GPU Admissibility)
+-# -----------------------------------------------------------------------------
+-
+-def validate_gpu_against_cpu(gpu_result: cp.ndarray, cpu_func: Callable,
+-                              input_data: np.ndarray, tolerance: float = 1e-5) -> Dict[str, Any]:
+-    """
+-    Validate GPU computation against CPU reference implementation.
+-    
+-    GPU results are NOT guaranteed reproducible between CPU and GPU. Forensic
+-    validation requires comparing GPU results against CPU reference implementations
+-    with documented tolerance thresholds.
+-    
+-    Args:
+-        gpu_result: Result from GPU computation
+-        cpu_func: CPU reference function to compare against
+-        input_data: Input data for the CPU function
+-        tolerance: Acceptable tolerance threshold
+-        
+-    Returns:
+-        Dictionary containing validation results and environment info
+-    """
+-    cpu_result = cpu_func(input_data)
+-    gpu_result_cpu = cp.asnumpy(gpu_result)
+-    
+-    max_diff = float(np.max(np.abs(gpu_result_cpu - cpu_result)))
+-    mean_diff = float(np.mean(np.abs(gpu_result_cpu - cpu_result)))
+-    
+-    validation = {
+-        'max_absolute_difference': max_diff,
+-        'mean_absolute_difference': mean_diff,
+-        'tolerance_threshold': tolerance,
+-        'validation_passed': max_diff < tolerance,
+-        'numpy_version': np.__version__,
+-        'cupy_version': cp.__version__,
+-    }
+-    
+-    # Try to get CUDA info
+-    try:
+-        validation['cuda_version'] = str(cp.cuda.runtime.runtimeGetVersion())
+-        validation['gpu_model'] = cp.cuda.Device().name.decode() if hasattr(cp.cuda.Device().name, 'decode') else str(cp.cuda.Device().name)
+-    except Exception as e:
+-        validation['cuda_info_error'] = str(e)
+-    
+-    if not validation['validation_passed']:
+-        log.error(f"GPU/CPU VALIDATION FAILED: max_diff={max_diff:.2e}")
+-    
+-    return validation
+-
+-
+-# -----------------------------------------------------------------------------
+-# Issue 8 Fix: ENBW Window Correction for PSD
+-# -----------------------------------------------------------------------------
+-
+ def compute_enbw(window: np.ndarray) -> float:
+-    """
+-    Compute Equivalent Noise Bandwidth for a window function.
+-    
+-    ENBW = N × Σw² / (Σw)²
+-    
+-    This correction is required for accurate PSD calculation:
+-    PSD = |FFT(x)|² / (fs × N × ENBW)
+-    
+-    Args:
+-        window: Window function array
+-        
+-    Returns:
+-        ENBW value
+-    """
+-    return len(window) * np.sum(window**2) / (np.sum(window)**2)
+-
+-
+-def compute_psd_forensic(signal: cp.ndarray, fs: float, nfft: int, 
+-                         window_type: str = 'hann') -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+-    """
+-    Compute Power Spectral Density with ENBW correction for forensic accuracy.
+-    
+-    Args:
+-        signal: Input signal
+-        fs: Sample rate
+-        nfft: FFT size
+-        window_type: Window function type
+-        
+-    Returns:
+-        Tuple of (frequencies, PSD values, metadata)
+-    """
+-    # Create window
+-    if window_type == 'hann':
+-        window = np.hanning(nfft)
+-    elif window_type == 'blackman':
+-        window = np.blackman(nfft)
+-    elif window_type == 'hamming':
+-        window = np.hamming(nfft)
+-    else:
+-        window = np.ones(nfft)
+-    
+-    window_gpu = cp.asarray(window)
+-    enbw = compute_enbw(window)
+-    
+-    # Apply window and compute FFT
+-    signal_windowed = signal[:nfft] * window_gpu
+-    fft_result = cp.fft.fft(signal_windowed)
+-    
+-    # Compute PSD with ENBW correction
+-    psd = cp.abs(fft_result)**2 / (fs * nfft * enbw)
+-    
+-    freqs = np.fft.fftfreq(nfft, 1/fs)
+-    
+-    metadata = {
+-        'window_type': window_type,
+-        'enbw': float(enbw),
+-        'nfft': nfft,
+-        'sample_rate': fs,
+-        'enbw_corrected': True
+-    }
+-    
+-    return freqs, cp.asnumpy(psd), metadata
++    """Compute Equivalent Noise Bandwidth for a window function."""
++    return len(window) * np.sum(window**2) / (np.sum(window) ** 2)
+ 
+ 
+ # -----------------------------------------------------------------------------
+ # Issue 9 Fix: Bonferroni Correction for Multiple Hypothesis Testing
+ # -----------------------------------------------------------------------------
+ 
+ def apply_bonferroni_correction(pfa_desired: float, num_hypotheses: int) -> float:
+     """
+     Apply Bonferroni correction for multiple hypothesis testing.
+     
+     P_FA_single = P_FA_desired / N_codes
+     
+     This is required when testing multiple codes (e.g., Gold codes) to maintain
+     the overall false alarm rate.
+     
+     Args:
+         pfa_desired: Desired overall probability of false alarm
+         num_hypotheses: Number of hypotheses being tested
+         
+     Returns:
+         Corrected per-test probability of false alarm
+     """
+     return pfa_desired / num_hypotheses
+ 
+ 
+-# -----------------------------------------------------------------------------
+-# Issue 10 Fix: Data Format Conversion Documentation
+-# -----------------------------------------------------------------------------
+-
+-def get_precision_bits(dtype) -> int:
+-    """Get the precision bits for a given dtype."""
+-    dtype = np.dtype(dtype)
+-    if np.issubdtype(dtype, np.floating):
+-        return np.finfo(dtype).bits
+-    elif np.issubdtype(dtype, np.complexfloating):
+-        # For complex types, return the bits of the underlying float
+-        if dtype == np.complex64:
+-            return 32
+-        elif dtype == np.complex128:
+-            return 64
+-    return dtype.itemsize * 8
+-
+-
+-def document_format_conversion(original_dtype, converted_dtype, 
+-                                justification: str = None) -> Dict[str, Any]:
+-    """
+-    Document data format conversion for forensic compliance.
+-    
+-    All precision changes must be documented to maintain chain of custody.
+-    
+-    Args:
+-        original_dtype: Original data type
+-        converted_dtype: Converted data type
+-        justification: Reason for conversion
+-        
+-    Returns:
+-        Dictionary documenting the conversion
+-    """
+-    precision_bits_original = get_precision_bits(original_dtype)
+-    precision_bits_converted = get_precision_bits(converted_dtype)
+-    
+-    if justification is None:
+-        justification = "ADC precision (12-16 bit) within float32 mantissa (23 bit)"
+-    
+-    return {
+-        'original_dtype': str(original_dtype),
+-        'converted_dtype': str(converted_dtype),
+-        'precision_bits_original': precision_bits_original,
+-        'precision_bits_converted': precision_bits_converted,
+-        'conversion_justified': justification,
+-        'timestamp_utc': datetime.now(timezone.utc).isoformat()
+-    }
+-
+-
+ # -----------------------------------------------------------------------------
+ # Issue 11 Fix: Processing Step Hash Chain (Forensic Pipeline)
+ # -----------------------------------------------------------------------------
+ 
+ class ForensicPipeline:
+     """
+     Manages forensic chain of custody for signal processing.
+     
+     Creates a verifiable audit trail for all processing steps applied to a signal,
+     ensuring compliance with forensic standards like NIST SP 800-86, ISO/IEC 27037,
+     and SWGDE best practices.
+     """
+     
+     def __init__(self):
+         self.hash_chain: List[Dict[str, Any]] = []
+     
+     def add_hash_checkpoint(self, data: Union[np.ndarray, cp.ndarray], 
+                             stage: str, details: Dict[str, Any] = None) -> str:
+         """
+         Add a checkpoint to the hash chain.
+         
+         Args:
+             data: Data at current processing stage
+             stage: Name of the processing stage
+             details: Additional details about the processing step
+@@ -3409,58 +3082,59 @@ Examples:
+     # Digital signal analysis options
+     parser.add_argument('--digital', '-d', action='store_true',
+                        help='Enable deep digital signal analysis')
+ 
+     parser.add_argument('--block-size', type=int, default=1024,
+                        help='Block size for digital analysis (default: 1024)')
+ 
+     parser.add_argument('--threshold', type=float, default=None,
+                        help='Demodulation threshold (default: auto-detect)')
+ 
+     # V3 enhanced analysis options
+     parser.add_argument('--v3', action='store_true',
+                        help='Enable v3 enhanced analysis (FFT debug, spreading codes, bit/frame)')
+ 
+     return parser.parse_args()
+ 
+ 
+ def main():
+     """Main entry point."""
+     args = parse_args()
+     
+     if args.verbose:
+         logging.getLogger().setLevel(logging.DEBUG)
+     
+     # Check GPU availability (Issue 5 Fix: Don't exit, use CPU fallback)
+-    if GPU_AVAILABLE:
++    gpu_available = GPU_AVAILABLE
++    if gpu_available:
+         try:
+             device = cp.cuda.Device(0)
+             mem_info = device.mem_info
+             log.info(f"GPU: Device 0 | Memory: {mem_info[1] / 1e9:.1f} GB (Free: {mem_info[0] / 1e9:.1f} GB)")
+         except Exception as e:
+             log.warning(f"CUDA device error: {e}. Falling back to CPU mode.")
+-            GPU_AVAILABLE = False
++            gpu_available = False
+     else:
+         log.warning("CUDA not available. Running in CPU-only mode (slower performance).")
+         log.info("To enable GPU acceleration, install CuPy: pip install cupy-cuda12x")
+     
+     # Build configuration
+     format_map = {
+         'complex64': DataFormat.COMPLEX64,
+         'complex128': DataFormat.COMPLEX128,
+         'int16': DataFormat.INT16_IQ,
+         'int8': DataFormat.INT8_IQ,
+         'float32': DataFormat.FLOAT32_REAL,
+     }
+     
+     config = AnalysisConfig(
+         sample_rate=args.sample_rate,
+         center_freq=args.center_freq,
+         data_format=format_map[args.format],
+         fft_size=args.fft_size,
+         output_dir=args.output,
+         dark_theme=not args.light,
+         digital_analysis=args.digital,
+         digital_block_size=args.block_size,
+         digital_threshold=args.threshold,
+     )
+     
