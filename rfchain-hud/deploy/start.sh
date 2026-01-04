@@ -123,9 +123,9 @@ echo -e "${CYAN}[5/6] Installing dependencies...${NC}"
 cd "$PROJECT_DIR"
 if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ]; then
     if command -v pnpm &> /dev/null; then
-        pnpm install --prod
+        pnpm install
     else
-        npm install --production
+        npm install
     fi
 fi
 
