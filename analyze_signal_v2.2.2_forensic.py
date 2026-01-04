@@ -35,20 +35,18 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, List, Dict, Any, Union, Callable
-from enum import Enum
+from typing import Optional, Tuple, List, Dict, Any, Union, Callable, Literal
+from enum import Enum, auto
 from collections import Counter
 from math import log2, gcd
-from functools import reduce
 import argparse
 import logging
 import sys
-import json
 from datetime import datetime
 from contextlib import contextmanager
 import warnings
 import hashlib
-import os
+import os  # Used for cpu_count() in parallel processing optimization
 from scipy.signal import find_peaks, welch
 
 # Suppress matplotlib font warnings
@@ -104,12 +102,18 @@ def cp_asnumpy(arr):
         return cp_asnumpy(arr)
     return np.asarray(arr)
 
-# =============================================================================
+# System info for forensic audit trail
+SYSTEM_CPU_CORES = os.cpu_count() or 1  # Used for parallel processing optimization
+
+# ==============================================================================
 # FORENSIC COMPLIANCE MODULE (Added for NIST/SWGDE/ISO 27037 compliance)
 # =============================================================================
 
 # Issue 4 Fix: Removed duplicate imports (already imported above)
 from datetime import timezone  # Only import timezone (datetime already imported)
+
+# Additional imports for extended forensic features
+from dataclasses import asdict
 
 # -----------------------------------------------------------------------------
 # Issue 2 Fix: Dual-Algorithm Hashing (SWGDE Compliance)
@@ -649,6 +653,1680 @@ def correlate_forensic(x: cp.ndarray, reference: cp.ndarray,
 # END FORENSIC COMPLIANCE MODULE
 
 # =============================================================================
+
+# =============================================================================
+# EXTENDED FORENSIC FEATURES MODULE
+
+# Re-import required modules for extended features
+import json
+import xml.etree.ElementTree as ET
+from functools import reduce
+
+# Implements: Acquisition Uncertainty, Emitter Fingerprinting, Longitudinal
+# Analysis, Hypothesis Management, Adversarial Detection, and Evidence Packaging
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Feature 1: AcquisitionUncertaintyModel
+# -----------------------------------------------------------------------------
+
+import dataclasses
+
+log = logging.getLogger(__name__)
+
+class ClockSourceType(Enum):
+    """
+    Enumeration for the type of clock source used in the acquisition hardware.
+
+    Forensic Relevance:
+        The stability and accuracy of the clock source are critical for establishing the
+        temporal and frequency integrity of a captured signal. This enumeration helps
+        categorize the quality of the timing reference, which directly impacts the
+        uncertainty calculations. Per SWGDE guidelines, documenting the hardware
+        specifications is essential for the technical review process.
+    """
+    FREE_RUNNING = auto()
+    TCXO = auto()  # Temperature Compensated Crystal Oscillator
+    OCXO = auto()  # Oven Controlled Crystal Oscillator
+    GPSDO = auto() # GPS Disciplined Oscillator
+
+@dataclasses.dataclass
+class AcquisitionUncertaintyModel:
+    """
+    Models the sources of uncertainty in the signal acquisition process.
+
+    This class tracks various parameters that contribute to timing and frequency
+    errors in a digital signal acquisition system. By quantifying these uncertainties,
+    it provides a foundational component for a forensic signal analysis workflow,
+    adhering to NIST SP 800-86 and SWGDE principles of documenting and accounting
+    for measurement uncertainty.
+
+    Attributes:
+        clock_source (ClockSourceType): The type of oscillator used as the time base.
+        clock_accuracy_ppm (float): The manufacturer-specified accuracy of the clock in parts-per-million.
+        drift_rate_ppb_hour (float): The rate of clock frequency change over time, in parts-per-billion per hour.
+        pps_alignment_uncertainty_ns (float): The uncertainty in aligning the SDR's clock with a 1 Pulse-Per-Second (PPS) signal, in nanoseconds.
+        os_buffer_latency_ms (float): An estimate of the latency introduced by the operating system's data buffering, in milliseconds.
+        sdr_timestamp_valid (bool): A flag indicating whether the SDR's internal timestamp is considered reliable.
+    """
+    clock_source: ClockSourceType
+    clock_accuracy_ppm: float
+    drift_rate_ppb_hour: float
+    pps_alignment_uncertainty_ns: float
+    os_buffer_latency_ms: float
+    sdr_timestamp_valid: bool
+
+    def __post_init__(self):
+        log.info(f"Initialized AcquisitionUncertaintyModel: {self.to_dict()}")
+
+    def estimate_time_uncertainty(self, duration_seconds: float) -> float:
+        """
+        Estimates the total time uncertainty over a given duration.
+
+        Forensic Relevance:
+            This estimation is crucial for establishing the error bounds of any time-based
+            measurements performed on the acquired data. It combines the initial alignment
+            uncertainty with the accumulated drift over the observation period, providing a
+            defensible metric for the temporal accuracy of the evidence.
+
+        Args:
+            duration_seconds (float): The duration of the acquisition in seconds.
+
+        Returns:
+            float: The estimated total time uncertainty in nanoseconds.
+        """
+        # Convert drift from ppb/hour to a unitless factor per second
+        drift_per_second = (self.drift_rate_ppb_hour / 1e9) / 3600
+        accumulated_drift_ns = drift_per_second * duration_seconds * 1e9
+
+        # Convert OS latency from ms to ns
+        os_latency_ns = self.os_buffer_latency_ms * 1e6
+
+        # Total uncertainty is the sum of contributing factors
+        total_uncertainty_ns = self.pps_alignment_uncertainty_ns + os_latency_ns + accumulated_drift_ns
+        log.debug(f"Estimated time uncertainty over {duration_seconds}s: {total_uncertainty_ns:.4f} ns")
+        return total_uncertainty_ns
+
+    def estimate_frequency_uncertainty(self, center_frequency_hz: float) -> float:
+        """
+        Estimates the frequency uncertainty for a given center frequency.
+
+        Forensic Relevance:
+            Frequency accuracy is fundamental to the correct demodulation and analysis
+            of RF signals. This method quantifies the potential frequency error based on
+            the clock's inherent accuracy, which is a required parameter for any forensically
+            sound frequency-domain analysis.
+
+        Args:
+            center_frequency_hz (float): The center frequency of the acquisition in Hz.
+
+        Returns:
+            float: The estimated frequency uncertainty in Hz.
+        """
+        # Convert clock accuracy from ppm to a unitless factor
+        accuracy_factor = self.clock_accuracy_ppm / 1e6
+        frequency_uncertainty_hz = center_frequency_hz * accuracy_factor
+        log.debug(f"Estimated frequency uncertainty at {center_frequency_hz / 1e6} MHz: {frequency_uncertainty_hz:.4f} Hz")
+        return frequency_uncertainty_hz
+
+    def to_dict(self) -> dict:
+        """
+        Converts the dataclass instance to a dictionary.
+
+        Forensic Relevance:
+            Provides a simple, serializable format for logging and reporting, ensuring
+            that all relevant metadata about acquisition uncertainty is captured in the
+            forensic audit trail, as recommended by SWGDE guidelines.
+        """
+        return dataclasses.asdict(self)
+
+
+# -----------------------------------------------------------------------------
+# Feature 2: EmitterFingerprint
+# -----------------------------------------------------------------------------
+
+import dataclasses
+
+# Assume 'cp' is the CuPy module if available, otherwise NumPy.
+# (cp is already defined in the main script)
+
+@dataclass
+class EmitterFingerprint:
+    """Represents the unique RF characteristics of a transmitter.
+
+    These metrics, when combined, form a 'fingerprint' that can be used to
+    identify a specific emitter, even among devices of the same make and model.
+    This is crucial for forensic analysis to trace signals back to a source.
+    """
+    frequency_drift_hz_per_second: Optional[float] = None
+    phase_noise_dBc_Hz: Optional[float] = None
+    burst_consistency_score: Optional[float] = None
+    symbol_clock_jitter_ppm: Optional[float] = None
+    error_vector_magnitude_percent: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Converts the fingerprint to a dictionary for logging or serialization."""
+        return dataclasses.asdict(self)
+
+    def compare_fingerprints(self, other: 'EmitterFingerprint') -> float:
+        """Compares this fingerprint to another, returning a similarity score (0-1).
+
+        Forensic relevance: This allows for matching a captured signal's fingerprint
+        against a database of known emitters to identify the source device.
+        """
+        if not isinstance(other, EmitterFingerprint):
+            raise TypeError("Can only compare with another EmitterFingerprint object.")
+
+        metrics_self = self.to_dict()
+        metrics_other = other.to_dict()
+        
+        # Simple weighted average of normalized differences
+        total_diff = 0
+        num_metrics = 0
+        weights = {
+            'frequency_drift_hz_per_second': 0.2,
+            'phase_noise_dBc_Hz': 0.3,
+            'burst_consistency_score': 0.2,
+            'symbol_clock_jitter_ppm': 0.15,
+            'error_vector_magnitude_percent': 0.15
+        }
+
+        for key, self_val in metrics_self.items():
+            other_val = metrics_other.get(key)
+            if self_val is not None and other_val is not None:
+                # Normalize difference to a 0-1 scale (assuming larger values are worse)
+                max_val = max(abs(self_val), abs(other_val), 1e-9)
+                diff = 1 - (abs(self_val - other_val) / max_val)
+                total_diff += diff * weights[key]
+                num_metrics += weights[key]
+
+        if num_metrics == 0:
+            return 1.0 # Or 0.0 if no metrics to compare
+
+        similarity = total_diff / num_metrics
+        log.info(f"Forensic comparison: Fingerprint similarity score: {similarity:.4f}")
+        return similarity
+
+    @classmethod
+    def compute_from_signal(cls, iq_samples: cp.ndarray, sample_rate: float) -> 'EmitterFingerprint':
+        """Computes the fingerprint metrics from a given I/Q signal.
+
+        Forensic relevance: This is the core function to extract identifying
+        characteristics from a raw signal capture.
+        """
+        xp = cp.get_array_module(iq_samples)
+        log.info(f"Starting emitter fingerprint computation on {'GPU' if xp == cp else 'CPU'}.")
+
+        # 1. Frequency Drift
+        # A simple method: split signal, find FFT peak shift
+        n_samples = len(iq_samples)
+        first_half = iq_samples[:n_samples//2]
+        second_half = iq_samples[n_samples//2:]
+        
+        fft_first = xp.fft.fft(first_half)
+        fft_second = xp.fft.fft(second_half)
+        
+        freqs = xp.fft.fftfreq(len(fft_first), 1/sample_rate)
+        
+        peak1_idx = xp.argmax(xp.abs(fft_first))
+        peak2_idx = xp.argmax(xp.abs(fft_second))
+        
+        freq1 = freqs[peak1_idx]
+        freq2 = freqs[peak2_idx]
+        
+        duration_s = n_samples / sample_rate
+        frequency_drift = (freq2 - freq1) / (duration_s / 2)
+        log.info(f"Computed frequency drift: {frequency_drift:.2f} Hz/s")
+
+        # 2. Phase Noise (at 10kHz offset)
+        # Calculate Power Spectral Density (PSD)
+        f, pxx = xp.welch(iq_samples, fs=sample_rate, nperseg=1024, return_onesided=False)
+        pxx = xp.fft.fftshift(pxx)
+        f = xp.fft.fftshift(f)
+        
+        center_freq_idx = xp.argmax(pxx)
+        center_power_dB = 10 * xp.log10(pxx[center_freq_idx])
+        
+        offset_10khz = 10000
+        offset_idx = xp.argmin(xp.abs(f - (f[center_freq_idx] + offset_10khz)))
+        
+        noise_power_dB = 10 * xp.log10(pxx[offset_idx])
+        phase_noise = noise_power_dB - center_power_dB
+        log.info(f"Computed phase noise at 10kHz: {phase_noise:.2f} dBc/Hz")
+
+        # 3. Burst Consistency Score
+        # Simple version: correlate start and end of the signal
+        burst_len = min(n_samples // 4, 4096) # Use a portion for correlation
+        start_burst = iq_samples[:burst_len]
+        end_burst = iq_samples[-burst_len:]
+        
+        corr = xp.correlate(start_burst - xp.mean(start_burst), end_burst - xp.mean(end_burst), mode='valid')
+        # Normalize correlation
+        norm_factor = xp.sqrt(xp.sum(xp.abs(start_burst)**2) * xp.sum(xp.abs(end_burst)**2))
+        burst_consistency = xp.abs(corr[0]) / norm_factor if norm_factor > 0 else 0
+        log.info(f"Computed burst consistency score: {burst_consistency:.4f}")
+
+        # 4. Symbol Clock Jitter (Placeholder)
+        # A full implementation is complex. This is a simplified placeholder.
+        # We'll look at the variance in the instantaneous frequency as a proxy.
+        instantaneous_phase = xp.unwrap(xp.angle(iq_samples))
+        instantaneous_freq = xp.diff(instantaneous_phase) * (sample_rate / (2 * xp.pi))
+        # Jitter is related to the stability of this frequency
+        jitter_proxy = xp.std(instantaneous_freq)
+        # Convert to a plausible ppm value (this is heuristic)
+        symbol_clock_jitter = (jitter_proxy / 1e6) * 1e6 # proxy -> ppm
+        log.info(f"Computed symbol clock jitter (proxy): {symbol_clock_jitter:.2f} ppm")
+
+        # 5. Error Vector Magnitude (EVM)
+        # Requires a reference signal. We'll assume BPSK and generate one.
+        # This is a major simplification.
+        demod_bits = (xp.real(iq_samples) > 0).astype(int)
+        ref_symbols = (demod_bits * 2 - 1).astype(xp.complex64)
+        
+        # Normalize power
+        ref_symbols *= xp.sqrt(xp.mean(xp.abs(iq_samples)**2))
+
+        error_vector = iq_samples - ref_symbols
+        evm_rms = xp.sqrt(xp.mean(xp.abs(error_vector)**2))
+        ref_rms = xp.sqrt(xp.mean(xp.abs(ref_symbols)**2))
+        
+        error_vector_magnitude = (evm_rms / ref_rms) * 100 if ref_rms > 0 else 0
+        log.info(f"Computed EVM: {error_vector_magnitude:.2f}%")
+
+        return cls(
+            frequency_drift_hz_per_second=float(cp_asnumpy(frequency_drift)),
+            phase_noise_dBc_Hz=float(cp_asnumpy(phase_noise)),
+            burst_consistency_score=float(cp_asnumpy(burst_consistency)),
+            symbol_clock_jitter_ppm=float(cp_asnumpy(symbol_clock_jitter)),
+            error_vector_magnitude_percent=float(cp_asnumpy(error_vector_magnitude))
+        )
+
+
+
+# -----------------------------------------------------------------------------
+# Feature 3: LongitudinalAnalyzer
+# -----------------------------------------------------------------------------
+
+import dataclasses
+
+
+# Assume 'log' is a pre-configured logger
+log = logging.getLogger(__name__)
+
+# Helper function for GPU->CPU conversion
+class SignalState(Enum):
+    """Enumeration for signal states based on feature analysis."""
+    IDLE = auto()
+    BURST = auto()
+    HOPPING = auto()
+    SILENT = auto()
+
+@dataclasses.dataclass
+class WindowedFeatures:
+    """Container for features extracted from a single window."""
+    timestamp: float
+    power: float
+    mean_frequency: float
+    bandwidth: float
+
+    def to_dict(self):
+        return dataclasses.asdict(self)
+
+class LongitudinalAnalyzer:
+    """
+    FEATURE 3: Longitudinal Analyzer
+    Performs sliding window feature extraction to track feature evolution over time,
+    adhering to SWGDE and NIST SP 800-86 standards for forensic signal analysis.
+    This allows for the examination of signal characteristics as they change, which is
+    critical for identifying transient events and understanding signal behavior.
+    """
+
+    def __init__(self, xp: Union[np, cp] = np):
+        """
+        Initializes the LongitudinalAnalyzer.
+        Args:
+            xp: The numerical library to use (numpy or cupy).
+        """
+        self.xp = xp
+        log.info("LongitudinalAnalyzer initialized for %s.", "GPU (CuPy)" if xp == cp else "CPU (NumPy)")
+
+    def extract_windowed_features(self, signal: Union[np.ndarray, cp.ndarray], window_size: int, overlap: float) -> List[WindowedFeatures]:
+        """
+        Extracts features from a signal using a sliding window.
+
+        Forensic Relevance: This method provides a temporal view of signal features,
+        allowing an analyst to pinpoint when significant changes in the signal occurred.
+        The windowing process is a standard technique in time-frequency analysis.
+
+        Args:
+            signal: The input signal (1D array).
+            window_size: The size of the sliding window.
+            overlap: The fraction of overlap between consecutive windows (0.0 to 1.0).
+
+        Returns:
+            A list of WindowedFeatures objects, one for each window.
+        """
+        if not (0.0 <= overlap < 1.0):
+            raise ValueError("Overlap must be in the range [0.0, 1.0)")
+
+        step = int(window_size * (1 - overlap))
+        features_list = []
+        
+        for i in range(0, len(signal) - window_size + 1, step):
+            window = signal[i:i + window_size]
+            
+            timestamp = i + window_size / 2.0
+            
+            power = self.xp.mean(self.xp.abs(window)**2)
+            
+            # Simplified frequency features for demonstration
+            fft_freq = self.xp.fft.fftfreq(window_size)
+            fft_val = self.xp.fft.fft(window)
+            
+            # Mean Frequency
+            mean_frequency = self.xp.sum(fft_freq * self.xp.abs(fft_val)) / self.xp.sum(self.xp.abs(fft_val))
+
+            # Bandwidth (RMS bandwidth)
+            bandwidth = self.xp.sqrt(self.xp.sum(((fft_freq - mean_frequency)**2) * self.xp.abs(fft_val)) / self.xp.sum(self.xp.abs(fft_val)))
+
+            features = WindowedFeatures(
+                timestamp=timestamp,
+                power=float(cp_asnumpy(power)),
+                mean_frequency=float(cp_asnumpy(mean_frequency)),
+                bandwidth=float(cp_asnumpy(bandwidth))
+            )
+            features_list.append(features)
+            log.debug(f"Extracted features for window at timestamp {timestamp}")
+
+        log.info(f"Extracted features for {len(features_list)} windows.")
+        return features_list
+
+    def detect_change_points(self, features: List[WindowedFeatures], threshold: float) -> List[float]:
+        """
+        Detects change points in the feature evolution.
+
+        Forensic Relevance: Automatically identifies moments of significant change in the
+        signal, which could correspond to the start or end of a transmission, a change
+        in modulation, or an anomaly. This is a key step in segmenting a signal for
+        further analysis.
+
+        Args:
+            features: A list of WindowedFeatures objects.
+            threshold: The threshold for detecting a change point.
+
+        Returns:
+            A list of timestamps where change points are detected.
+        """
+        change_points = []
+        if len(features) < 2:
+            return change_points
+
+        powers = self.xp.array([f.power for f in features])
+        power_diff = self.xp.diff(powers)
+        
+        # Using a simple threshold on the difference of powers
+        change_indices = self.xp.where(self.xp.abs(power_diff) > threshold)[0]
+
+        for idx in change_indices:
+            change_points.append(features[idx+1].timestamp)
+            log.warning(f"Change point detected at timestamp {features[idx+1].timestamp} due to power change.")
+
+        return cp_asnumpy(self.xp.array(change_points)).tolist()
+
+    def classify_state(self, features: WindowedFeatures) -> SignalState:
+        """
+        Classifies the state of a single window based on its features.
+
+        Forensic Relevance: Provides a high-level classification of the signal state at a
+        given time, which helps in quickly understanding the signal's behavior without
+        needing to inspect the raw data. This is useful for creating a timeline of
+        signal activity.
+
+        Args:
+            features: A WindowedFeatures object.
+
+        Returns:
+            The classified signal state (SignalState enum).
+        """
+        # These thresholds would be empirically determined
+        if features.power < 0.01:
+            return SignalState.SILENT
+        elif features.bandwidth > 0.1:
+            return SignalState.HOPPING
+        elif features.power > 0.5:
+            return SignalState.BURST
+        else:
+            return SignalState.IDLE
+
+    def to_dict(self) -> Dict:
+        """
+        Returns a dictionary representation of the analyzer's configuration.
+
+        Forensic Relevance: Provides a record of the configuration used for the analysis,
+        which is essential for reproducibility and auditing, as required by forensic
+        standards.
+        """
+        return {
+            "feature": "LongitudinalAnalyzer",
+            "xp": "cupy" if self.xp == cp else "numpy"
+        }
+
+
+# -----------------------------------------------------------------------------
+# Feature 4: HypothesisManager
+# -----------------------------------------------------------------------------
+
+import dataclasses
+
+# Assume cp and np are defined elsewhere, and log is a configured logger
+# For standalone testing, you can uncomment the following lines:
+# import numpy as np
+# import cupy as cp
+# logging.basicConfig(level=logging.INFO)
+# log = logging.getLogger(__name__)
+
+@dataclasses.dataclass
+class Hypothesis:
+    """Container for a single hypothesis, its score, and associated metadata.
+
+    This structure is essential for maintaining a clear and auditable record of the
+    analytical process, in line with forensic best practices. Each hypothesis represents
+    a potential explanation for an observation in the RF signal data.
+
+    Attributes:
+        name (str): A unique identifier for the hypothesis (e.g., 'SignalIsQPSK').
+        score (float): The quantitative score supporting the hypothesis (e.g., a likelihood ratio).
+        threshold (float): The score threshold required to accept the hypothesis.
+        metadata (Dict[str, Any]): Additional data related to the hypothesis test.
+        rejected (bool): Flag indicating if the hypothesis has been rejected.
+        rejection_reason (Optional[str]): Justification for the rejection.
+    """
+    name: str
+    score: float
+    threshold: float
+    metadata: Dict[str, Any] = dataclasses.field(default_factory=dict)
+    rejected: bool = False
+    rejection_reason: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes the dataclass to a dictionary for reporting and logging."""
+        return dataclasses.asdict(self)
+
+class HypothesisManager:
+    """Manages the lifecycle of all tested hypotheses for a forensic examination.
+
+    This class serves as a central repository for all hypotheses generated during an
+    RF signal analysis. It ensures that all tested theories, both accepted and rejected,
+    are preserved as part of the forensic evidence trail, as required by standards
+    like NIST SP 800-86. Preserving rejected hypotheses is crucial as it documents the
+    analyst's thought process and prevents the loss of potentially relevant information.
+    """
+
+    def __init__(self, use_gpu: bool = False):
+        """Initializes the HypothesisManager.
+
+        Args:
+            use_gpu (bool): If True, use CuPy for array operations. Defaults to False.
+        """
+        self._hypotheses: Dict[str, Hypothesis] = {}
+        self.xp = cp if use_gpu else np
+        self.log = logging.getLogger(self.__class__.__name__)
+        self.log.info("HypothesisManager initialized.")
+
+    def add_hypothesis(self, name: str, score: float, threshold: float, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Adds a new hypothesis to the manager.
+
+        This method creates a formal record of a hypothesis being tested. Storing this
+        information is the first step in creating a robust audit trail.
+
+        Args:
+            name (str): The unique name of the hypothesis.
+            score (float): The calculated score for the hypothesis.
+            threshold (float): The acceptance threshold for the score.
+            metadata (Optional[Dict[str, Any]]): Any additional relevant data.
+        """
+        if name in self._hypotheses:
+            self.log.warning(f"Hypothesis '{name}' already exists and will be overwritten.")
+        
+        hypothesis = Hypothesis(
+            name=name,
+            score=score,
+            threshold=threshold,
+            metadata=metadata if metadata is not None else {},
+        )
+        self._hypotheses[name] = hypothesis
+        self.log.info(f"Added hypothesis: {name}, Score: {score:.4f}, Threshold: {threshold:.4f}")
+
+    def reject_hypothesis(self, name: str, reason: str) -> None:
+        """Marks a hypothesis as rejected.
+
+        Forensic principles require documenting not only what was found but also what was
+        ruled out. This method ensures that rejected hypotheses are explicitly flagged
+        and the reasoning is preserved as evidence.
+
+        Args:
+            name (str): The name of the hypothesis to reject.
+            reason (str): The justification for the rejection.
+        
+        Raises:
+            KeyError: If the hypothesis name does not exist.
+        """
+        if name not in self._hypotheses:
+            self.log.error(f"Attempted to reject non-existent hypothesis: {name}")
+            raise KeyError(f"Hypothesis '{name}' not found.")
+        
+        self._hypotheses[name].rejected = True
+        self._hypotheses[name].rejection_reason = reason
+        self.log.info(f"Rejected hypothesis: {name}, Reason: {reason}")
+
+    def get_best_hypothesis(self) -> Optional[Hypothesis]:
+        """Retrieves the non-rejected hypothesis with the highest score.
+
+        This method identifies the most likely hypothesis among the candidates that have
+        not been explicitly ruled out. It only considers hypotheses where the score meets
+        or exceeds the defined threshold.
+
+        Returns:
+            Optional[Hypothesis]: The winning hypothesis, or None if no suitable hypothesis exists.
+        """
+        accepted_hypotheses = [
+            h for h in self._hypotheses.values() 
+            if not h.rejected and h.score >= h.threshold
+        ]
+
+        if not accepted_hypotheses:
+            self.log.info("No hypothesis met the acceptance criteria.")
+            return None
+
+        best = max(accepted_hypotheses, key=lambda h: h.score)
+        self.log.info(f"Best hypothesis identified: {best.name} with score {best.score:.4f}")
+        return best
+
+    def get_all_hypotheses(self) -> List[Hypothesis]:
+        """Returns a list of all hypotheses, both accepted and rejected.
+
+        Returns:
+            List[Hypothesis]: The complete list of all hypotheses managed.
+        """
+        return list(self._hypotheses.values())
+
+    def export_hypothesis_report(self) -> str:
+        """Generates a human-readable report of all hypotheses.
+
+        This report is a critical forensic artifact, providing a summary of the entire
+        analytical process for review and legal proceedings.
+
+        Returns:
+            str: A formatted string detailing each hypothesis and its status.
+        """
+        report_lines = ["Forensic Hypothesis Report", "="*25]
+        if not self._hypotheses:
+            report_lines.append("No hypotheses were tested.")
+            return "\n".join(report_lines)
+
+        for h in self._hypotheses.values():
+            status = "REJECTED" if h.rejected else ("ACCEPTED" if h.score >= h.threshold else "INCONCLUSIVE")
+            report_lines.append(f"\n- Hypothesis: {h.name}")
+            report_lines.append(f"  - Status: {status}")
+            report_lines.append(f"  - Score: {h.score:.4f}")
+            report_lines.append(f"  - Threshold: {h.threshold:.4f}")
+            if h.rejected:
+                report_lines.append(f"  - Rejection Reason: {h.rejection_reason}")
+            if h.metadata:
+                report_lines.append("  - Metadata:")
+                for k, v in h.metadata.items():
+                    report_lines.append(f"    - {k}: {v}")
+        
+        self.log.info("Generated hypothesis report.")
+        return "\n".join(report_lines)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes the entire manager state to a dictionary.
+
+        This is useful for saving the state of the analysis or for passing the results
+        to other processes in a structured format.
+
+        Returns:
+            Dict[str, Any]: A dictionary representation of the HypothesisManager.
+        """
+        return {
+            'hypotheses': {name: h.to_dict() for name, h in self._hypotheses.items()}
+        }
+
+
+
+# -----------------------------------------------------------------------------
+# Feature 5: AdversarialDetector
+# -----------------------------------------------------------------------------
+
+
+# Assume log is configured elsewhere in the script
+log = logging.getLogger(__name__)
+
+# Helper function for GPU->CPU conversion (as defined in the problem description)
+class AdversarialMetrics:
+    """
+    A dataclass to hold the metrics from adversarial detection.
+    Forensic Relevance: Encapsulates quantitative indicators of signal manipulation,
+    providing a structured format for evidence logging and reporting as per SWGDE
+    and NIST guidelines.
+    """
+    replay_attack_detected: bool = False
+    jitter_level: float = 0.0
+    pn_degradation_factor: float = 0.0
+    spoofing_likelihood: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Converts the dataclass to a dictionary."""
+        return asdict(self)
+
+class AdversarialDetector:
+    """
+    FEATURE 5: AdversarialDetector class
+    Detects potential signal manipulation including replay attacks, deliberate
+    jitter injection, PN sequence degradation, and spoofing. This aligns with
+    NIST SP 800-86 and SWGDE principles of ensuring data integrity and
+    authenticity.
+    """
+
+    def __init__(self, xp: Union[np, cp] = np):
+        """
+        Initializes the AdversarialDetector.
+        Args:
+            xp (Union[np, cp]): The numerical library to use (NumPy or CuPy).
+        """
+        self.xp = xp
+        self.metrics = AdversarialMetrics()
+        log.info("Forensic tool: AdversarialDetector initialized.")
+
+    def detect_replay(self, signal: Union[np.ndarray, cp.ndarray], reference_db: List[Union[np.ndarray, cp.ndarray]]) -> bool:
+        """
+        Detects replay attacks by comparing signal segments against a reference database.
+        Forensic Relevance: Identifies reused signal portions, which is a strong
+        indicator of a replay attack, compromising the authenticity of the signal.
+        A simple cross-correlation check is used here.
+        """
+        log.info("Performing replay attack detection.")
+        max_corr = 0
+        for ref_signal in reference_db:
+            ref_signal = self.xp.asarray(ref_signal)
+            if len(signal) > len(ref_signal):
+                corr = self.xp.correlate(signal, ref_signal, mode='valid')
+                current_max_corr = self.xp.max(corr)
+            else:
+                corr = self.xp.correlate(ref_signal, signal, mode='valid')
+                current_max_corr = self.xp.max(corr)
+
+            if current_max_corr > max_corr:
+                max_corr = current_max_corr
+
+        # Normalize correlation
+        norm_factor = self.xp.sqrt(self.xp.sum(signal**2) * self.xp.sum(ref_signal**2))
+        if norm_factor > 0:
+            max_corr /= norm_factor
+
+        if max_corr > 0.95: # High correlation threshold
+            self.metrics.replay_attack_detected = True
+            log.warning(f"High correlation ({cp_asnumpy(max_corr):.4f}) found. Potential replay attack detected.")
+            return True
+
+        log.info("No significant correlation found for replay attack.")
+        self.metrics.replay_attack_detected = False
+        return False
+
+    def detect_jitter_injection(self, signal: Union[np.ndarray, cp.ndarray]) -> float:
+        """
+        Detects jitter by analyzing the phase variations in the signal.
+        Forensic Relevance: Unnatural jitter can indicate intentional signal
+        disruption or manipulation. This method provides a quantitative measure
+        of such timing instability.
+        """
+        log.info("Detecting jitter injection.")
+        phase = self.xp.angle(signal)
+        phase_diff = self.xp.diff(phase)
+        jitter = self.xp.std(phase_diff)
+        self.metrics.jitter_level = float(cp_asnumpy(jitter))
+        log.info(f"Calculated jitter level: {self.metrics.jitter_level:.4f}")
+        return self.metrics.jitter_level
+
+    def detect_pn_degradation(self, signal: Union[np.ndarray, cp.ndarray], expected_pn: Union[np.ndarray, cp.ndarray]) -> float:
+        """
+        Detects degradation of a Pseudo-Noise (PN) sequence through correlation.
+        Forensic Relevance: PN sequences are used for synchronization and identification.
+        Their degradation can point to signal spoofing or interference.
+        """
+        log.info("Detecting PN sequence degradation.")
+        expected_pn = self.xp.asarray(expected_pn)
+        if len(signal) < len(expected_pn):
+            log.warning("Signal is shorter than the expected PN sequence.")
+            return 1.0 # Max degradation
+
+        correlation = self.xp.correlate(signal, expected_pn, mode='valid')
+        peak_corr = self.xp.max(self.xp.abs(correlation))
+        
+        # Normalize the peak correlation
+        norm_factor = self.xp.sqrt(self.xp.sum(signal**2) * self.xp.sum(expected_pn**2))
+        if norm_factor > 0:
+            peak_corr /= norm_factor
+
+        degradation = 1.0 - peak_corr
+        self.metrics.pn_degradation_factor = float(cp_asnumpy(degradation))
+        log.info(f"PN degradation factor: {self.metrics.pn_degradation_factor:.4f}")
+        return self.metrics.pn_degradation_factor
+
+    def calculate_spoof_likelihood(self, signal: Union[np.ndarray, cp.ndarray]) -> float:
+        """
+        Calculates a likelihood of the signal being spoofed based on several heuristics.
+        Forensic Relevance: Provides a composite score indicating the probability of
+        spoofing, which is a deliberate attempt to impersonate a legitimate signal.
+        This is a simplified model.
+        """
+        log.info("Calculating spoofing likelihood.")
+        # Example heuristic: high power, low noise might indicate a close, powerful spoofer
+        signal_power = self.xp.mean(self.xp.abs(signal)**2)
+        noise_power = self.xp.var(signal) # Simplified noise estimation
+        snr = 10 * self.xp.log10(signal_power / noise_power) if noise_power > 0 else 50
+
+        # Likelihood increases with abnormally high SNR
+        spoof_likelihood = 1 / (1 + self.xp.exp(-(snr - 30) / 5)) # Sigmoid function centered at 30dB SNR
+        self.metrics.spoofing_likelihood = float(cp_asnumpy(spoof_likelihood))
+        log.info(f"Spoofing likelihood: {self.metrics.spoofing_likelihood:.4f}")
+        return self.metrics.spoofing_likelihood
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Returns the collected adversarial metrics as a dictionary.
+        Forensic Relevance: Provides a snapshot of all adversarial indicators for
+        logging and reporting, ensuring a comprehensive audit trail.
+        """
+        log.info("Exporting adversarial metrics to dictionary.")
+        return self.metrics.to_dict()
+
+
+# -----------------------------------------------------------------------------
+## Feature 6: RationalResampling
+# -----------------------------------------------------------------------------
+# (math already imported at top of file)
+
+
+def find_common_rate(*rates: int) -> int:
+    """
+    Finds the least common multiple (LCM) of a series of sample rates.
+
+    In digital forensics, establishing a common sampling rate is crucial when
+    analyzing multiple signals that were sampled at different frequencies. This
+    ensures that all signals can be processed and compared within a unified
+    time-domain framework, preventing misinterpretation of event timing and
+    phase relationships as per SWGDE guidelines.
+
+    Args:
+        *rates: A variable number of integer sample rates.
+
+    Returns:
+        The lowest common sample rate (LCM) for the given rates.
+    """
+    if not rates:
+        raise ValueError("At least one rate must be provided.")
+    
+    def lcm(a, b):
+        if a == 0 or b == 0:
+            return 0
+        return abs(a * b) // gcd(a, b)
+
+    common_rate = reduce(lcm, rates)
+    log.info(f'Determined common sample rate for {rates} to be {common_rate} Hz.')
+    return common_rate
+
+def resample_rational(signal, input_rate: int, output_rate: int):
+    """
+    Resamples a signal from an input rate to an output rate using rational conversion.
+
+    Forensic analysis of digital signals requires precise rate conversion to inspect
+    signals in different domains or prepare them for standardized analysis tools.
+    This function uses polyphase resampling with GCD-simplified interpolation and
+    decimation factors, ensuring minimal signal distortion and maintaining the
+    integrity of the evidence, which is a key principle in digital forensics.
+
+    Args:
+        signal: The input signal array (CuPy or NumPy).
+        input_rate: The sample rate of the input signal in Hz.
+        output_rate: The desired output sample rate in Hz.
+
+    Returns:
+        The resampled signal array.
+    """
+    if input_rate == output_rate:
+        return signal
+
+    # Use math.gcd to find the simplest interpolation/decimation factors L/M
+    common_divisor = gcd(input_rate, output_rate)
+    L = output_rate // common_divisor
+    M = input_rate // common_divisor
+
+    log.info(f'Resampling signal from {input_rate} Hz to {output_rate} Hz.')
+    log.debug(f'Rational resampling factors: L={L}, M={M}.')
+
+    # Polyphase implementation
+    # 1. Design a low-pass filter.
+    # The cutoff frequency should be half the minimum of the two rates to prevent aliasing.
+    cutoff = 0.5 / max(L, M)
+    # A longer filter provides better anti-aliasing but is computationally more expensive.
+    # The length is a trade-off; 20 * max(L, M) is a reasonable starting point.
+    filter_len = 20 * max(L, M)
+    
+    # Using a simple windowed sinc (Lanczos) filter
+    t = cp.arange(-filter_len, filter_len + 1)
+    sinc_filter = cp.sinc(2 * cutoff * t)
+    window = cp.blackman(len(sinc_filter))
+    lpf = sinc_filter * window
+    lpf *= L # Scale filter gain to compensate for interpolation
+
+    # 2. Upsample by L (polyphase implementation is more efficient than zero-stuffing)
+    # Reshape the filter into a polyphase matrix.
+    num_phases = L
+    taps_per_phase = (len(lpf) + L - 1) // L
+    polyphase_filter = cp.zeros((num_phases, taps_per_phase))
+    padded_lpf = cp.concatenate([lpf, cp.zeros(taps_per_phase * L - len(lpf))])
+    polyphase_filter = padded_lpf.reshape(num_phases, taps_per_phase)
+
+    # Pre-pend zeros to the signal to account for filter delay.
+    num_zeros_to_pad = (len(lpf) - 1) // 2
+    padded_signal = cp.concatenate([cp.zeros(num_zeros_to_pad), signal, cp.zeros(num_zeros_to_pad)])
+
+    # 3. Convolve each phase of the signal with the corresponding filter phase.
+    # This is the core of polyphase filtering.
+    upsampled_len = len(padded_signal) * L
+    resampled_signal = cp.zeros(upsampled_len)
+    
+    # This part is complex to vectorize efficiently without a dedicated library.
+    # A direct convolution for each phase is clearer here.
+    for i in range(L):
+        phase_conv = cp.convolve(padded_signal, polyphase_filter[i, :], mode='full')
+        # The results are placed at intervals of L.
+        resampled_signal[i::L] = phase_conv[:len(resampled_signal[i::L])]
+
+    # 4. Downsample by M
+    final_signal = resampled_signal[::M]
+
+    log.info(f'Signal resampling complete. Original length: {len(signal)}, New length: {len(final_signal)}.')
+    return final_signal
+
+
+# -----------------------------------------------------------------------------
+# Feature 7: DifferentialDecoder
+# -----------------------------------------------------------------------------
+
+
+# Assume 'cp' is imported as CuPy if available, otherwise it's NumPy.
+# This would be handled by the main script's setup.
+try:
+    GPU_ENABLED = True
+except ImportError:
+    cp = np
+    GPU_ENABLED = False
+
+# Assume a pre-configured logger instance 'log' is available
+log = logging.getLogger(__name__)
+
+# Helper function assumed to exist in the script
+# Placeholder for the existing DigitalSignalAnalysis class
+class DigitalSignalAnalysis:
+    def __init__(self, signal_name: str):
+        self.signal_name = signal_name
+        self.results: Dict[str, Any] = {}
+
+    def add_result(self, key: str, value: Any):
+        self.results[key] = value
+        log.info(f"Result '{key}' added to analysis for {self.signal_name}")
+
+# --- Start of new feature implementation ---
+
+@dataclass
+class DifferentialDecodeMetrics:
+    """
+    Container for metrics related to the differential decoding process.
+
+    Forensic Relevance:
+        In forensic signal analysis, accurate decoding is paramount. This container
+        stores critical parameters that document the decoding method and its performance.
+        The detected encoding type (NRZ-I/NRZ-S) is essential for correctly interpreting
+        the bitstream. The Bit Error Rate (BER) provides a quantitative measure of the
+        decoder's accuracy against a known reference, which is vital for establishing
+        the reliability of the recovered data as evidence, in accordance with SWGDE
+        and NIST guidelines for documenting digital forensic processes.
+    """
+    detected_encoding: Literal["NRZ-I", "NRZ-S", "Unknown"]
+    bit_error_rate: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Returns a dictionary representation of the metrics."""
+        return asdict(self)
+
+class DifferentialDecoder:
+    """
+    A forensic tool for differentially decoding a bitstream, with automatic detection
+    of NRZ-I or NRZ-S encoding and Bit Error Rate (BER) estimation.
+
+    Forensic Relevance:
+        Differential coding is a common technique in RF communications to mitigate issues
+        with signal polarity inversions. This class provides a forensically sound method
+        for decoding such signals by automatically determining the encoding scheme and
+        quantifying the accuracy of the decoded data. The logging of each step provides
+        a clear audit trail, which is a core requirement for forensic tools.
+    """
+
+    def __init__(self, use_gpu: bool = False):
+        """
+        Initializes the DifferentialDecoder.
+
+        Args:
+            use_gpu (bool): If True, attempts to use CuPy for GPU acceleration.
+                            Defaults to False.
+        """
+        self.xp = cp if use_gpu and GPU_ENABLED else np
+        if use_gpu and not GPU_ENABLED:
+            log.warning("GPU mode requested, but CuPy is not available. Falling back to CPU.")
+        log.info(f"DifferentialDecoder initialized in {'GPU' if self.xp == cp else 'CPU'} mode.")
+
+    def _differential_decode(self, bits: Union[np.ndarray, cp.ndarray], encoding: Literal["NRZ-I", "NRZ-S"]) -> Union[np.ndarray, cp.ndarray]:
+        """
+        Performs differential decoding based on the specified line code.
+
+        Args:
+            bits (Union[np.ndarray, cp.ndarray]): The input bitstream (0s and 1s).
+            encoding (Literal["NRZ-I", "NRZ-S"]): The line code to use for decoding.
+
+        Returns:
+            Union[np.ndarray, cp.ndarray]: The decoded bitstream.
+        """
+        # Prepend a zero to establish the initial state for comparison
+        bits_with_prev = self.xp.concatenate((self.xp.array([0]), bits))
+        transitions = (bits_with_prev[1:] != bits_with_prev[:-1]).astype(int)
+
+        if encoding == "NRZ-I":
+            # In NRZ-I, a transition represents a '1'
+            return transitions
+        elif encoding == "NRZ-S":
+            # In NRZ-S, a transition represents a '0'
+            return 1 - transitions
+        else:
+            raise ValueError("Unsupported encoding type specified.")
+
+    def _detect_encoding(self, bits: Union[np.ndarray, cp.ndarray]) -> Literal["NRZ-I", "NRZ-S"]:
+        """
+        Automatically detects the most likely differential encoding scheme.
+
+        This is a heuristic-based method. It decodes the stream using both NRZ-I and
+        NRZ-S and assumes the one producing fewer long runs of identical bits is more
+        likely to be correct, as raw data is often scrambled to avoid this.
+
+        Args:
+            bits (Union[np.ndarray, cp.ndarray]): The input bitstream.
+
+        Returns:
+            Literal["NRZ-I", "NRZ-S"]: The detected encoding type.
+        """
+        decoded_nri = self._differential_decode(bits, "NRZ-I")
+        decoded_nrs = self._differential_decode(bits, "NRZ-S")
+
+        # Heuristic: count transitions in the decoded stream. More transitions often means more "random" data.
+        transitions_nri = self.xp.sum(decoded_nri[1:] != decoded_nri[:-1])
+        transitions_nrs = self.xp.sum(decoded_nrs[1:] != decoded_nrs[:-1])
+
+        detected = "NRZ-I" if transitions_nri >= transitions_nrs else "NRZ-S"
+        log.info(f"Automatic encoding detection selected: {detected} (NRZ-I transitions: {transitions_nri}, NRZ-S transitions: {transitions_nrs})")
+        return detected
+
+    def _estimate_ber(self, decoded_bits: Union[np.ndarray, cp.ndarray], reference_bits: Union[np.ndarray, cp.ndarray]) -> float:
+        """
+        Estimates the Bit Error Rate (BER) against a reference bitstream.
+
+        Args:
+            decoded_bits (Union[np.ndarray, cp.ndarray]): The decoded bitstream.
+            reference_bits (Union[np.ndarray, cp.ndarray]): The ground truth bitstream.
+
+        Returns:
+            float: The calculated Bit Error Rate.
+        """
+        if decoded_bits.size != reference_bits.size:
+            log.warning("Size mismatch for BER estimation. Truncating to the smaller size.")
+            min_size = min(decoded_bits.size, reference_bits.size)
+            decoded_bits = decoded_bits[:min_size]
+            reference_bits = reference_bits[:min_size]
+
+        error_count = self.xp.sum(decoded_bits != reference_bits)
+        ber = float(error_count) / decoded_bits.size
+        log.info(f"BER calculated: {ber:.6f} ({cp_asnumpy(error_count)} errors in {decoded_bits.size} bits)")
+        return ber
+
+    def decode_and_analyze(
+        self, 
+        bits: Union[np.ndarray, cp.ndarray], 
+        analysis_container: DigitalSignalAnalysis,
+        reference_bits: Optional[Union[np.ndarray, cp.ndarray]] = None
+    ) -> None:
+        """
+        Decodes a bitstream, analyzes the result, and integrates it into the provided
+        DigitalSignalAnalysis container.
+
+        Args:
+            bits (Union[np.ndarray, cp.ndarray]): The raw bitstream to decode.
+            analysis_container (DigitalSignalAnalysis): The container to store results.
+            reference_bits (Optional[Union[np.ndarray, cp.ndarray]]): Optional ground truth
+                bitstream for BER calculation.
+        """
+        log.info(f"Starting differential decoding and analysis for {analysis_container.signal_name}.")
+        
+        input_bits = self.xp.asarray(bits)
+
+        detected_encoding = self._detect_encoding(input_bits)
+        decoded_bits = self._differential_decode(input_bits, detected_encoding)
+
+        ber = None
+        if reference_bits is not None:
+            ref_bits = self.xp.asarray(reference_bits)
+            ber = self._estimate_ber(decoded_bits, ref_bits)
+        
+        metrics = DifferentialDecodeMetrics(
+            detected_encoding=detected_encoding,
+            bit_error_rate=ber
+        )
+
+        analysis_container.add_result("differential_decode_metrics", metrics.to_dict())
+        analysis_container.add_result("decoded_bits", cp_asnumpy(decoded_bits))
+        log.info(f"Differential decoding complete for {analysis_container.signal_name}.")
+
+
+
+# -----------------------------------------------------------------------------
+# Feature 8: GoldCodeSequenceLengthValidation
+# -----------------------------------------------------------------------------
+
+
+# Assume 'cp' is the CuPy module if available, otherwise NumPy.
+# This would be handled by the main script's setup.
+# (cp is already defined in the main script)
+
+# Assume 'log' is a pre-configured logger instance
+log = logging.getLogger(__name__)
+
+@dataclass
+class PNSequenceValidationResult:
+    """
+    Container for the results of a PN sequence validation check.
+
+    Forensic Relevance:
+        Ensuring that pseudo-noise (PN) sequences like Gold codes have the
+        correct, theoretically-defined length is a critical validation step in
+        forensic signal analysis. An incorrect length can indicate a
+        misconfigured generator, a corrupted signal, or a non-standard
+        implementation, all of which are forensically significant findings
+        that must be documented in the audit trail. This dataclass stores
+        the outcome of such a validation for reporting.
+    """
+    is_valid: bool
+    sequence_length: int
+    expected_length: int
+    message: str
+
+    def to_dict(self):
+        return asdict(self)
+
+def validate_pn_sequence(sequence, expected_length: int) -> PNSequenceValidationResult:
+    """
+    Validates the length of a pseudo-noise (PN) sequence.
+
+    Args:
+        sequence (cp.ndarray or np.ndarray): The PN sequence to validate.
+        expected_length (int): The expected length of the sequence.
+
+    Returns:
+        PNSequenceValidationResult: An object containing the validation result.
+
+    Forensic Relevance:
+        This function serves as a forensic audit checkpoint. According to standards
+        like NIST SP 800-86, all steps in a forensic examination must be
+        documented and verifiable. This validation ensures the generated Gold
+        code conforms to its mathematical definition, which is a necessary
+        condition for its use in correlation-based signal acquisition.
+        Deviations are logged for the forensic record.
+    """
+    actual_length = len(sequence)
+    is_valid = actual_length == expected_length
+    if is_valid:
+        message = f"PN sequence length validation passed. Length: {actual_length}."
+        log.info(message)
+    else:
+        message = f"PN sequence length validation FAILED. Expected: {expected_length}, Got: {actual_length}."
+        log.error(message)
+    
+    return PNSequenceValidationResult(
+        is_valid=is_valid,
+        sequence_length=actual_length,
+        expected_length=expected_length,
+        message=message
+    )
+
+def generate_gold_code(m_sequence1, m_sequence2, degree: int):
+    """
+    Generates a Gold code sequence from two preferred m-sequences and validates its length.
+
+    Args:
+        m_sequence1 (cp.ndarray or np.ndarray): The first preferred m-sequence.
+        m_sequence2 (cp.ndarray or np.ndarray): The second preferred m-sequence.
+        degree (int): The degree of the generator polynomials used for the m-sequences.
+
+    Returns:
+        The generated Gold code sequence (cp.ndarray or np.ndarray).
+
+    Forensic Relevance:
+        Gold codes are used in spread spectrum systems (e.g., GPS) for their
+        well-defined correlation properties. Forensically, verifying the properties
+        of a received signal against known Gold code families is crucial for
+        system identification and signal demodulation. This function generates a
+        candidate Gold code and performs a critical length validation check as
+        part of the forensic process. An invalid length immediately flags a potential
+        anomaly, which is critical for the investigation.
+    """
+    log.debug(f"Generating Gold code with m-sequences of length {len(m_sequence1)} and {len(m_sequence2)}.")
+    
+    # Ensure sequences are on the same device (GPU/CPU)
+    xp = cp.get_array_module(m_sequence1)
+    m_sequence2 = xp.asarray(m_sequence2)
+
+    assert len(m_sequence1) == len(m_sequence2), "M-sequences must have the same length."
+    
+    gold_code = (m_sequence1 + m_sequence2) % 2
+    
+    # FEATURE 8: Validate Gold code sequence length
+    expected_length = (2**degree) - 1
+    log.info(f"Performing Gold code length validation. Expected length N = 2^{degree}-1 = {expected_length}.")
+    validation_result = validate_pn_sequence(gold_code, expected_length)
+    
+    # Assertion for forensic integrity; stops processing if validation fails.
+    assert validation_result.is_valid, f"Forensic integrity check failed: {validation_result.message}"
+    
+    log.info(f"Successfully generated and validated Gold code of length {len(gold_code)}.")
+    return gold_code
+
+
+# -----------------------------------------------------------------------------
+# Feature 9: FFTDebugAnalyzerMethods
+# -----------------------------------------------------------------------------
+
+import dataclasses
+
+
+log = logging.getLogger(__name__)
+
+class WindowEffectsMetrics:
+    """Metrics for evaluating the effects of different windowing functions on a signal."""
+    main_lobe_width_hz: float
+    side_lobe_level_db: float
+    coherent_gain: float
+
+    def to_dict(self):
+        return dataclasses.asdict(self)
+
+@dataclasses.dataclass
+class FrequencyResolutionMetrics:
+    """Metrics for evaluating the frequency resolution at different FFT sizes."""
+    frequency_resolution_hz: float
+
+    def to_dict(self):
+        return dataclasses.asdict(self)
+
+@dataclasses.dataclass
+class QuantizationNoiseMetrics:
+    """Metrics for evaluating the effects of quantization noise at different bit depths."""
+    sqnr_db: float
+
+    def to_dict(self):
+        return dataclasses.asdict(self)
+
+class FFTDebugAnalyzer:
+    def analyze_window_effects(self, signal: Union[np.ndarray, cp.ndarray], windows_to_test: List[str], sample_rate: float) -> Dict[str, WindowEffectsMetrics]:
+        """
+        Analyzes the effects of different windowing functions on the signal's FFT.
+
+        Forensic Relevance:
+            Windowing functions are used to mitigate spectral leakage in FFT analysis.
+            Different windows offer trade-offs between frequency resolution (main lobe width)
+            and dynamic range (side lobe level). This analysis helps justify the choice
+            of window function, ensuring that artifacts from the windowing process itself
+            are understood and documented, which is crucial for the integrity of
+            frequency-domain forensic analysis.
+        """
+        log.info("Starting analysis of window effects.")
+        xp = cp.get_array_module(signal)
+        results = {}
+        n = len(signal)
+
+        for window_name in windows_to_test:
+            try:
+                window_func = getattr(xp, window_name)
+                window = window_func(n)
+            except AttributeError:
+                log.warning(f"Window function '{window_name}' not found. Skipping.")
+                continue
+
+            log.info(f"Analyzing window: {window_name}")
+
+            # Coherent Gain
+            coherent_gain = xp.sum(window) / n
+
+            # FFT of the window to find main lobe and side lobes
+            padded_n = 8 * n # Zero-padding for better resolution of the window's spectrum
+            window_fft = xp.fft.fft(window, padded_n)
+            window_fft_mag = xp.abs(window_fft)
+            window_fft_mag_db = 20 * xp.log10(window_fft_mag / xp.max(window_fft_mag))
+            
+            freqs = xp.fft.fftfreq(padded_n, 1/sample_rate)
+            
+            # Main Lobe Width
+            main_lobe_indices = xp.where(window_fft_mag_db > -3)[0]
+            main_lobe_width_hz = (freqs[main_lobe_indices[-1]] - freqs[main_lobe_indices[0]]) if len(main_lobe_indices) > 1 else 0
+
+            # Side Lobe Level
+            # Find the peak of the first side lobe
+            # A simple approach is to find the max value outside the main lobe
+            main_lobe_end_index = main_lobe_indices[-1]
+            side_lobes = window_fft_mag_db[main_lobe_end_index:]
+            side_lobe_level_db = xp.max(side_lobes) if len(side_lobes) > 0 else -np.inf
+
+            results[window_name] = WindowEffectsMetrics(
+                main_lobe_width_hz=cp_asnumpy(main_lobe_width_hz),
+                side_lobe_level_db=cp_asnumpy(side_lobe_level_db),
+                coherent_gain=cp_asnumpy(coherent_gain)
+            )
+            log.debug(f"Window '{window_name}' metrics: {results[window_name]}")
+
+        log.info("Completed analysis of window effects.")
+        return results
+
+    def analyze_frequency_resolution(self, signal: Union[np.ndarray, cp.ndarray], fft_sizes: List[int], sample_rate: float) -> Dict[int, FrequencyResolutionMetrics]:
+        """
+        Analyzes the frequency resolution for different FFT sizes.
+
+        Forensic Relevance:
+            Frequency resolution is a critical parameter in spectrum analysis. It determines
+            the ability to distinguish between two closely spaced frequency components.
+            This analysis documents the trade-off between time and frequency resolution
+            for a given signal, which is essential for justifying the chosen FFT parameters
+            and ensuring the accuracy of frequency measurements.
+        """
+        log.info("Starting analysis of frequency resolution.")
+        results = {}
+
+        for fft_size in fft_sizes:
+            log.info(f"Analyzing FFT size: {fft_size}")
+            
+            if fft_size > len(signal):
+                log.warning(f"FFT size {fft_size} is greater than signal length {len(signal)}. This will result in zero-padding.")
+
+            frequency_resolution = sample_rate / fft_size
+            results[fft_size] = FrequencyResolutionMetrics(
+                frequency_resolution_hz=frequency_resolution
+            )
+            log.debug(f"FFT size {fft_size} resolution: {frequency_resolution} Hz")
+
+        log.info("Completed analysis of frequency resolution.")
+        return results
+
+    def analyze_quantization_noise(self, signal: Union[np.ndarray, cp.ndarray], bit_depths: List[int]) -> Dict[int, QuantizationNoiseMetrics]:
+        """
+        Analyzes the effect of quantization noise at different bit depths.
+
+        Forensic Relevance:
+            Quantization is the process of converting a continuous-amplitude signal into a
+            digital signal with a finite number of levels. This process introduces
+            quantization noise. Understanding the Signal-to-Quantization-Noise Ratio (SQNR)
+            at different bit depths is crucial for assessing the fidelity of a digitized
+            signal and ensuring that fine details are not obscured by quantization artifacts.
+        """
+        log.info("Starting analysis of quantization noise.")
+        xp = cp.get_array_module(signal)
+        results = {}
+
+        for bits in bit_depths:
+            log.info(f"Analyzing bit depth: {bits}")
+            
+            # Normalize signal to [-1, 1]
+            normalized_signal = signal / xp.max(xp.abs(signal))
+            
+            # Quantize the signal
+            quantization_levels = 2**bits
+            quantized_signal = xp.round(normalized_signal * (quantization_levels / 2)) / (quantization_levels / 2)
+            
+            # Calculate quantization error (noise)
+            quantization_error = normalized_signal - quantized_signal
+            
+            # Calculate power of signal and noise
+            signal_power = xp.mean(normalized_signal**2)
+            noise_power = xp.mean(quantization_error**2)
+            
+            if noise_power == 0:
+                sqnr_db = float('inf') # Or a very large number to represent infinite SQNR
+            else:
+                sqnr = signal_power / noise_power
+                sqnr_db = 10 * xp.log10(sqnr)
+
+            results[bits] = QuantizationNoiseMetrics(
+                sqnr_db=cp_asnumpy(sqnr_db)
+            )
+            log.debug(f"Bit depth {bits} SQNR: {results[bits].sqnr_db} dB")
+
+        log.info("Completed analysis of quantization noise.")
+        return results
+
+
+
+# -----------------------------------------------------------------------------
+# Feature 11: ForensicEvidencePackage
+# -----------------------------------------------------------------------------
+
+
+log = logging.getLogger(__name__)
+
+@dataclass
+class ForensicEvidencePackage:
+    """A container for bundling all forensic analysis results and metadata.
+
+    This class serves as a comprehensive package for all evidence collected and
+    generated during a forensic analysis of an RF signal. It is designed to be
+    compliant with forensic standards requiring the encapsulation of evidence,
+    analysis, and chain of custody.
+
+    Attributes:
+        analysis_results: A dictionary of analysis results.
+        hypothesis_reports: A list of hypothesis reports.
+        uncertainty_models: A list of uncertainty models.
+        chain_of_custody: A list of chain of custody records.
+    """
+    analysis_results: Dict[str, Any] = field(default_factory=dict)
+    hypothesis_reports: List[str] = field(default_factory=list)
+    uncertainty_models: List[Any] = field(default_factory=list)
+    chain_of_custody: List[str] = field(default_factory=list)
+
+    def add_analysis_result(self, name: str, result: Any):
+        """Adds an analysis result to the evidence package.
+
+        Args:
+            name: The name of the analysis result.
+            result: The result of the analysis.
+        """
+        self.analysis_results[name] = result
+        log.info(f"Added analysis result: {name}")
+
+    def add_hypothesis_report(self, report: str):
+        """Adds a hypothesis report to the evidence package.
+
+        Args:
+            report: The hypothesis report.
+        """
+        self.hypothesis_reports.append(report)
+        log.info("Added hypothesis report.")
+
+    def add_uncertainty_model(self, model: Any):
+        """Adds an uncertainty model to the evidence package.
+
+        Args:
+            model: The uncertainty model.
+        """
+        self.uncertainty_models.append(model)
+        log.info("Added uncertainty model.")
+
+    def generate_evidence_summary(self) -> str:
+        """Generates a summary of the evidence package.
+
+        Returns:
+            A string summary of the evidence package.
+        """
+        summary = "Forensic Evidence Summary:\n"
+        summary += f"- Analysis Results: {len(self.analysis_results)}\n"
+        summary += f"- Hypothesis Reports: {len(self.hypothesis_reports)}\n"
+        summary += f"- Uncertainty Models: {len(self.uncertainty_models)}\n"
+        summary += f"- Chain of Custody Records: {len(self.chain_of_custody)}\n"
+        return summary
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Converts the evidence package to a dictionary.
+
+        Returns:
+            A dictionary representation of the evidence package.
+        """
+        return asdict(self)
+
+    def export_to_json(self, filepath: str):
+        """Exports the evidence package to a JSON file.
+
+        Args:
+            filepath: The path to the JSON file.
+        """
+        with open(filepath, 'w') as f:
+            json.dump(self.to_dict(), f, indent=4)
+        log.info(f"Exported evidence package to JSON: {filepath}")
+
+    def export_to_xml(self, filepath: str):
+        """Exports the evidence package to an XML file.
+
+        Args:
+            filepath: The path to the XML file.
+        """
+        root = ET.Element("ForensicEvidencePackage")
+
+        results_el = ET.SubElement(root, "AnalysisResults")
+        for name, result in self.analysis_results.items():
+            res_el = ET.SubElement(results_el, "Result", name=name)
+            res_el.text = str(result)
+
+        hypotheses_el = ET.SubElement(root, "HypothesisReports")
+        for report in self.hypothesis_reports:
+            rep_el = ET.SubElement(hypotheses_el, "Report")
+            rep_el.text = report
+
+        models_el = ET.SubElement(root, "UncertaintyModels")
+        for model in self.uncertainty_models:
+            mod_el = ET.SubElement(models_el, "Model")
+            mod_el.text = str(model)
+
+        chain_el = ET.SubElement(root, "ChainOfCustody")
+        for record in self.chain_of_custody:
+            rec_el = ET.SubElement(chain_el, "Record")
+            rec_el.text = record
+
+        tree = ET.ElementTree(root)
+        tree.write(filepath)
+        log.info(f"Exported evidence package to XML: {filepath}")
+
+    def calculate_evidence_hash(self, algorithm: str = 'sha256') -> str:
+        """Calculates a hash of the evidence package.
+
+        Args:
+            algorithm: The hashing algorithm to use.
+
+        Returns:
+            The hexadecimal hash of the evidence package.
+        """
+        package_string = json.dumps(self.to_dict(), sort_keys=True)
+        hasher = hashlib.new(algorithm)
+        hasher.update(package_string.encode('utf-8'))
+        return hasher.hexdigest()
+
+
+# -----------------------------------------------------------------------------
+# Feature 12: SignalStateTracker
+# -----------------------------------------------------------------------------
+
+
+try:
+    CUPY_AVAILABLE = True
+except ImportError:
+    CUPY_AVAILABLE = False
+
+log = logging.getLogger(__name__)
+
+# Helper for GPU->CPU conversion
+class SignalState(Enum):
+    """Enumeration for temporal signal states, aiding in forensic behavior analysis."""
+    IDLE = auto()
+    BURST = auto()
+    HOPPING = auto()
+    SILENT = auto()
+    UNKNOWN = auto()
+
+@dataclass
+class StateTransition:
+    """Represents a single transition between states for forensic logging."""
+    timestamp: float
+    from_state: SignalState
+    to_state: SignalState
+
+    def to_dict(self) -> Dict:
+        return {
+            "timestamp": self.timestamp,
+            "from_state": self.from_state.name,
+            "to_state": self.to_state.name
+        }
+
+class SignalStateTracker:
+    """
+    Tracks a signal's state over time, creating a forensic audit trail of its behavior.
+
+    This class implements a temporal state machine to log and analyze signal state 
+    transitions (e.g., IDLE, BURST, HOPPING). This is forensically relevant for 
+    profiling device behavior, detecting anomalies, and establishing a pattern of life 
+    for a given transmitter, in accordance with SWGDE and NIST principles for digital evidence.
+    """
+    def __init__(self, xp=np):
+        """
+        Initializes the state tracker.
+
+        Args:
+            xp (module): The numpy-like module to use for array operations (numpy or cupy).
+        """
+        self.xp = cp if CUPY_AVAILABLE and xp == cp else np
+        self.state_history: List[Tuple[float, SignalState]] = []
+        self.transitions: List[StateTransition] = []
+        log.info("SignalStateTracker initialized for forensic state tracking.")
+
+    def update_state(self, timestamp: float, new_state: SignalState, features: Optional[Dict] = None):
+        """
+        Updates the signal's state at a specific timestamp.
+
+        Forensic Relevance: Logs a new state observation, forming the basis of the 
+        temporal evidence chain. Each update is a recorded event.
+
+        Args:
+            timestamp (float): The timestamp of the state observation.
+            new_state (SignalState): The new state of the signal.
+            features (Optional[Dict]): Associated signal features for context (e.g., power, frequency).
+        """
+        if not isinstance(new_state, SignalState):
+            log.error(f"Invalid state type provided: {type(new_state)}. Must be SignalState enum.")
+            raise TypeError("new_state must be an instance of SignalState.")
+
+        if self.state_history:
+            last_timestamp, last_state = self.state_history[-1]
+            if timestamp < last_timestamp:
+                log.warning("Received out-of-order state update. Timestamps must be monotonic.")
+                # For forensic integrity, we may choose to reject or flag this.
+                # For this implementation, we will allow it but log a warning.
+            if new_state != last_state:
+                transition = StateTransition(timestamp, last_state, new_state)
+                self.transitions.append(transition)
+                log.info(f"Forensic Log: State transition at {timestamp}: {last_state.name} -> {new_state.name}")
+        else:
+            # First state, log an initial transition from UNKNOWN
+            transition = StateTransition(timestamp, SignalState.UNKNOWN, new_state)
+            self.transitions.append(transition)
+            log.info(f"Forensic Log: Initial state at {timestamp}: {new_state.name}")
+
+        self.state_history.append((timestamp, new_state))
+
+    def get_state_history(self) -> List[Dict]:
+        """Returns the complete history of observed states."""
+        return [{"timestamp": ts, "state": state.name} for ts, state in self.state_history]
+
+    def get_transition_count(self, from_state: SignalState, to_state: SignalState) -> int:
+        """
+        Counts the number of transitions between two specific states.
+
+        Forensic Relevance: Quantifies specific behavioral patterns, such as how many 
+        times a device switched from an IDLE to a BURST state.
+        """
+        return sum(1 for t in self.transitions if t.from_state == from_state and t.to_state == to_state)
+
+    def detect_anomalous_transitions(self, illegal_transitions: List[Tuple[SignalState, SignalState]]) -> List[Dict]:
+        """
+        Identifies transitions that are defined as anomalous or illegal.
+
+        Forensic Relevance: Helps in anomaly detection by flagging state changes that 
+        deviate from a known-good profile, potentially indicating malfunction or malicious activity.
+
+        Args:
+            illegal_transitions (List[Tuple[SignalState, SignalState]]): A list of tuples, 
+                                                                       where each represents an illegal 
+                                                                       (from_state, to_state) transition.
+
+        Returns:
+            A list of anomalous transitions found.
+        """
+        anomalies = []
+        illegal_set = set(illegal_transitions)
+        for t in self.transitions:
+            if (t.from_state, t.to_state) in illegal_set:
+                anomalies.append(t.to_dict())
+                log.warning(f"Anomalous transition detected at {t.timestamp}: {t.from_state.name} -> {t.to_state.name}")
+        return anomalies
+
+    def calculate_duty_cycle(self, target_state: SignalState) -> float:
+        """
+        Calculates the duty cycle for a given state.
+
+        Forensic Relevance: Determines the percentage of time a signal was in a specific
+        state (e.g., active transmission), which is critical for characterizing device usage.
+
+        Returns:
+            The duty cycle as a float between 0.0 and 1.0, or 0.0 if total time is zero.
+        """
+        if len(self.state_history) < 2:
+            return 0.0
+
+        timestamps = self.xp.array([ts for ts, state in self.state_history])
+        states = [state for ts, state in self.state_history]
+
+        total_time = timestamps[-1] - timestamps[0]
+        if total_time <= 0:
+            return 0.0
+
+        duration_in_state = 0.0
+        for i in range(len(self.state_history) - 1):
+            if states[i] == target_state:
+                duration_in_state += timestamps[i+1] - timestamps[i]
+        
+        # Check if the last state is the target state
+        if states[-1] == target_state:
+            # If so, we can't determine its duration. We can either ignore it or
+            # assume it lasts until the last timestamp. Here we've already accounted for
+            # durations between timestamps, so we do nothing extra.
+            pass
+
+        return cp_asnumpy(duration_in_state / total_time)
+
+    def to_dict(self) -> Dict:
+        """
+        Serializes the tracker's state to a dictionary for reporting.
+
+        Forensic Relevance: Provides a comprehensive, shareable record of the signal's
+        behavior, suitable for inclusion in a forensic report.
+        """
+        return {
+            "state_history": self.get_state_history(),
+            "transitions": [t.to_dict() for t in self.transitions]
+        }
+
 # FFT PIPELINE COMPARISON MODULE
 # For before/after FFT analysis, pipeline validation, and artifact attribution
 # =============================================================================
@@ -1632,8 +3310,7 @@ class SignalLoader:
 # =============================================================================
 # V3 ANALYZERS: FFT Debug, PN Sequence, Bit/Frame Analysis
 # =============================================================================
-
-class FFTDebugAnalyzer:
+class FFTDebugAnalyzerV3:  # Original V3 analyzer (see FFTDebugAnalyzerEnhanced for extended methods)
     """Comprehensive FFT pipeline diagnostics."""
 
     def __init__(self, fs: float):
@@ -1896,9 +3573,14 @@ class GoldCodeAnalyzer:
 
         taps1, taps2 = self.PREFERRED_PAIRS[degree]
         N = 2**degree - 1
-
         m1 = self.mseq.generate_msequence(degree, taps1)
         m2 = self.mseq.generate_msequence(degree, taps2)
+        
+        # Validate sequence lengths (forensic integrity check)
+        if len(m1) != N:
+            log.warning(f"M-sequence 1 length mismatch: expected {N}, got {len(m1)}")
+        if len(m2) != N:
+            log.warning(f"M-sequence 2 length mismatch: expected {N}, got {len(m2)}")
 
         if code_index == 0:
             return m1
@@ -2561,7 +4243,7 @@ class SignalAnalyzer:
         header = self._get_plot_header(source_name)
         ax.set_title(f'Spectrogram (Short-Time Fourier Transform)\n{header}', fontsize=12)
 
-        cbar = plt.colorbar(im, ax=ax, label='Power/Freq (dB/Hz)')
+        _ = plt.colorbar(im, ax=ax, label='Power/Freq (dB/Hz)')
 
         plt.tight_layout()
         self._save_figure(fig, filename)
@@ -3541,7 +5223,7 @@ class SignalAnalyzer:
 
     def analyze_fft_pipeline(self, data: cp.ndarray) -> FFTDebugMetrics:
         """Run FFT pipeline debug analysis."""
-        analyzer = FFTDebugAnalyzer(self.config.sample_rate)
+        analyzer = FFTDebugAnalyzerV3(self.config.sample_rate)
         return analyzer.full_analysis(data, self.config.fft_size)
 
     def analyze_spreading_codes(self, data: cp.ndarray) -> PNSequenceMetrics:
@@ -3776,20 +5458,20 @@ class SignalAnalyzer:
                           bit_frame: BitOrderMetrics):
         """Print v3 analysis summary."""
         print(f"\n{'='*60}")
-        print(f" V3 Enhanced Analysis Summary")
+        print(" V3 Enhanced Analysis Summary")
         print(f"{'='*60}")
-        print(f" FFT Debug:")
+        print(" FFT Debug:")
         print(f"   DC Problematic:     {fft.dc_is_problematic}")
         print(f"   Recommended Window: {fft.recommended_window}")
         print(f"   SNR (peak/median):  {fft.snr_peak_median_dB:.1f} dB")
         print(f"   Spurs Detected:     {fft.spurs_detected}")
-        print(f" Spreading Code:")
+        print(" Spreading Code:")
         print(f"   Type Detected:      {spreading.detected_type}")
         if spreading.detected_type != 'none':
             print(f"   Degree:             {spreading.detected_degree}")
             print(f"   Correlation Peak:   {spreading.correlation_peak:.3f}")
             print(f"   Confidence:         {spreading.confidence}")
-        print(f" Bit/Frame Analysis:")
+        print(" Bit/Frame Analysis:")
         print(f"   Bit Order:          {bit_frame.detected_order}")
         print(f"   Scrambler:          {bit_frame.scrambler_detected}")
         print(f"   Sync Word:          {bit_frame.sync_word_detected}")
@@ -4115,11 +5797,11 @@ def main():
             log.error("Both files must exist for comparison mode")
             return
         
-        log.info(f"FFT Pipeline Comparison Mode")
+        log.info("FFT Pipeline Comparison Mode")
         log.info(f"  Before: {before_file.name}")
         log.info(f"  After:  {after_file.name}")
         if args.after_is_fft:
-            log.info(f"  Note: 'After' file treated as FFT output (frequency domain)")
+            log.info("  Note: 'After' file treated as FFT output (frequency domain)")
         
         # Load both files
         before_data, _ = SignalLoader.load(before_file, config, max_samples=args.max_samples)
