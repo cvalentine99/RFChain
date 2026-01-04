@@ -1,0 +1,42 @@
+CREATE TABLE `signal_signatures` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`userId` int,
+	`name` varchar(255) NOT NULL,
+	`category` varchar(64) NOT NULL,
+	`subcategory` varchar(64),
+	`description` text,
+	`bandwidthMinHz` float,
+	`bandwidthMaxHz` float,
+	`centerFreqHz` float,
+	`modulationType` varchar(64),
+	`symbolRateMin` float,
+	`symbolRateMax` float,
+	`typicalPaprDb` float,
+	`paprToleranceDb` float,
+	`spectralFingerprint` json,
+	`fingerprintResolution` int,
+	`cyclicFrequencies` json,
+	`ofdmFftSize` int,
+	`ofdmCyclicPrefix` float,
+	`ofdmSubcarrierSpacing` float,
+	`matchThreshold` float DEFAULT 0.7,
+	`priority` int DEFAULT 0,
+	`isBuiltIn` int NOT NULL DEFAULT 0,
+	`enabled` int NOT NULL DEFAULT 1,
+	`referenceUrl` varchar(1024),
+	`referenceNotes` text,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `signal_signatures_id` PRIMARY KEY(`id`)
+);
+--> statement-breakpoint
+CREATE TABLE `signature_matches` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`analysisId` int NOT NULL,
+	`signatureId` int NOT NULL,
+	`matchScore` float NOT NULL,
+	`confidence` varchar(16) NOT NULL,
+	`matchDetails` json,
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	CONSTRAINT `signature_matches_id` PRIMARY KEY(`id`)
+);

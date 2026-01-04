@@ -260,31 +260,26 @@
 - [x] Add tests for local authentication (9 tests passing)
 - [x] All 99 tests passing
 
-## RAG v2 - Real Vector Search for Signal Data
-- [ ] Add FAISS vector store for local/offline vector search
-- [ ] Create signal metadata document schema for embedding
-- [ ] Implement chunking pipeline for spectral analysis results
-- [ ] Generate embeddings for all signal metadata fields
-- [ ] Store embeddings in FAISS index with signal ID mapping
-- [ ] Implement vector similarity search function
-- [ ] Update JARVIS chat to use RAG retrieval with context
-- [ ] Auto-index new analyses on completion
-- [ ] Add RAG search endpoint for direct queries
-- [ ] Test with real signal data
 
+## Plot Annotations with Key Findings
+- [ ] Time domain: Mark anomalies (dropouts, saturation) with red boxes, show RMS power line
+- [ ] Frequency domain: Mark bandwidth region, label spectral peaks, show noise floor line
+- [ ] Spectrogram: Overlay anomaly time markers, draw bandwidth boundaries
+- [ ] Constellation: Show ideal points as reference, display EVM percentage
+- [ ] Add text boxes with key metrics on each plot
+- [ ] Add forensic watermark (hash, timestamp, analyst) to all plots
 
-## RAG-Augmented Analysis Pipeline (NEW)
-- [ ] Create RAG context engine that queries during analysis
-- [ ] Add anomaly context queries ("What caused similar DC spikes?")
-- [ ] Add modulation similarity queries ("Similar QAM-128 signals in history")
-- [ ] Add signal quality queries ("How did we fix similar poor SNR?")
-- [ ] Add spectral signature matching ("Match against historical patterns")
-- [ ] Implement historical pattern matching with similarity scores
-- [ ] Add recommendation engine based on past solutions
-- [ ] Enhance JSON output with RAG context fields:
-  - similar_signals: list of matching historical signals
-  - pattern_matches: known signal profiles matched
-  - recommendations: actionable suggestions from history
-  - quality_comparison: how this signal compares to average
-- [ ] Integrate RAG queries into Python analysis script
-- [ ] Add RAG context to plot annotations
+## Signal Signature Library
+- [ ] Create signatures table in database schema
+- [ ] Build known signal profiles (WiFi 802.11a/b/g/n/ac, LTE bands, Bluetooth, ZigBee, LoRa, amateur radio)
+- [ ] Implement spectral fingerprint matching algorithm
+- [ ] Add signature matching to analysis pipeline
+- [ ] Create UI for viewing/managing signature library
+- [ ] Enable user-defined custom signatures
+
+## Batch Analysis Queue Enhancement
+- [ ] Implement batch upload endpoint for multiple files
+- [ ] Create queue processor with parallel GPU execution
+- [ ] Add progress tracking and status updates
+- [ ] Create batch upload UI with drag-and-drop for multiple files
+- [ ] Add batch results summary view

@@ -322,3 +322,83 @@ export const gpuBenchmarkHistory = mysqlTable("gpu_benchmark_history", {
 
 export type GpuBenchmarkHistory = typeof gpuBenchmarkHistory.$inferSelect;
 export type InsertGpuBenchmarkHistory = typeof gpuBenchmarkHistory.$inferInsert;
+
+
+/**
+ * Signal signatures - known signal profiles for automatic classification
+ */
+export const signalSignatures = mysqlTable("signal_signatures", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId"), // null = system/built-in signature
+  
+  // Signature identification
+  name: varchar("name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 64 }).notNull(), // WiFi, LTE, Bluetooth, Amateur, etc.
+  subcategory: varchar("subcategory", { length: 64 }), // 802.11n, Band 7, etc.
+  description: text("description"),
+  
+  // Spectral characteristics
+  bandwidthMinHz: float("bandwidthMinHz"),
+  bandwidthMaxHz: float("bandwidthMaxHz"),
+  centerFreqHz: float("centerFreqHz"), // If known
+  
+  // Modulation characteristics
+  modulationType: varchar("modulationType", { length: 64 }), // OFDM, QAM, FSK, etc.
+  symbolRateMin: float("symbolRateMin"),
+  symbolRateMax: float("symbolRateMax"),
+  
+  // Power characteristics
+  typicalPaprDb: float("typicalPaprDb"),
+  paprToleranceDb: float("paprToleranceDb"),
+  
+  // Spectral fingerprint (normalized PSD shape)
+  spectralFingerprint: json("spectralFingerprint"), // Array of normalized magnitude values
+  fingerprintResolution: int("fingerprintResolution"), // Number of bins in fingerprint
+  
+  // Cyclostationary features
+  cyclicFrequencies: json("cyclicFrequencies"), // Array of expected cyclic frequencies
+  
+  // OFDM-specific
+  ofdmFftSize: int("ofdmFftSize"),
+  ofdmCyclicPrefix: float("ofdmCyclicPrefix"),
+  ofdmSubcarrierSpacing: float("ofdmSubcarrierSpacing"),
+  
+  // Matching parameters
+  matchThreshold: float("matchThreshold").default(0.7), // Minimum similarity for match
+  priority: int("priority").default(0), // Higher = checked first
+  
+  // Metadata
+  isBuiltIn: int("isBuiltIn").default(0).notNull(), // 1 = system signature, 0 = user-defined
+  enabled: int("enabled").default(1).notNull(),
+  
+  // Reference info
+  referenceUrl: varchar("referenceUrl", { length: 1024 }),
+  referenceNotes: text("referenceNotes"),
+  
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type SignalSignature = typeof signalSignatures.$inferSelect;
+export type InsertSignalSignature = typeof signalSignatures.$inferInsert;
+
+/**
+ * Signature matches - records of signals matched to signatures
+ */
+export const signatureMatches = mysqlTable("signature_matches", {
+  id: int("id").autoincrement().primaryKey(),
+  analysisId: int("analysisId").notNull(),
+  signatureId: int("signatureId").notNull(),
+  
+  // Match quality
+  matchScore: float("matchScore").notNull(), // 0.0 to 1.0
+  confidence: varchar("confidence", { length: 16 }).notNull(), // high, medium, low
+  
+  // Match details
+  matchDetails: json("matchDetails"), // Which features matched and how well
+  
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type SignatureMatch = typeof signatureMatches.$inferSelect;
+export type InsertSignatureMatch = typeof signatureMatches.$inferInsert;

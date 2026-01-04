@@ -50,6 +50,13 @@
       "when": 1767549780512,
       "tag": "0006_melodic_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1767561282201,
+      "tag": "0007_lucky_tyrannus",
+      "breakpoints": true
     }
   ]
 }

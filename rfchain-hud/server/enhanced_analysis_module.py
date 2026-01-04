@@ -24,44 +24,8 @@ log = logging.getLogger(__name__)
 # =============================================================================
 
 @dataclass
-class ForensicUncertainty:
-    """Forensic measurement uncertainty quantification.
-
-    FORENSIC FIX v2.2.3: Added per NIST SP 800-86 and SWGDE requirements for
-    documenting measurement uncertainty in forensic RF analysis.
-
-    All forensic measurements must include uncertainty bounds to be admissible
-    as evidence. This class captures:
-    - Confidence intervals for classification decisions
-    - Error bounds on numerical measurements
-    - Alternative hypotheses considered and their probabilities
-    """
-    primary_hypothesis: str
-    primary_probability: float
-    alternative_hypotheses: List[Tuple[str, float]] = field(default_factory=list)
-    measurement_std_dev: float = 0.0
-    confidence_interval_95: Tuple[float, float] = (0.0, 0.0)
-    sample_size: int = 0
-    methodology: str = ""
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'primary_hypothesis': self.primary_hypothesis,
-            'primary_probability': self.primary_probability,
-            'alternative_hypotheses': self.alternative_hypotheses,
-            'measurement_std_dev': self.measurement_std_dev,
-            'confidence_interval_95': self.confidence_interval_95,
-            'sample_size': self.sample_size,
-            'methodology': self.methodology
-        }
-
-
-@dataclass
 class ModulationClassification:
-    """Results of modulation classification analysis.
-
-    FORENSIC FIX v2.2.3: Added uncertainty field for forensic compliance.
-    """
+    """Results of modulation classification analysis"""
     modulation_type: str  # QAM, PSK, OFDM, FSK, etc.
     order: int  # 4, 16, 64, 128, 256 for QAM/PSK
     confidence_percent: float
@@ -73,8 +37,6 @@ class ModulationClassification:
     is_ofdm: bool = False
     ofdm_fft_size: int = 0
     ofdm_cp_length: int = 0
-    # FORENSIC: Uncertainty quantification
-    uncertainty: Optional[ForensicUncertainty] = None
 
 class ModulationClassifier:
     """
@@ -188,25 +150,10 @@ class ModulationClassifier:
     
     @staticmethod
     def classify_qam_order(grid_analysis: Dict, constellation_points: int) -> Dict[str, Any]:
-        """Determine QAM order from analysis results.
-
-        FORENSIC FIX v2.2.3: Corrected QAM constellation grid mappings.
-        32-QAM and 128-QAM are cross constellations, not square grids.
-        - 32-QAM: Cross pattern derived from 6x6 grid minus 4 corners = 32 points
-        - 128-QAM: Cross pattern, not 12x12 (which would be 144 points)
-        """
-        # Format: order: (typical_i_levels, typical_q_levels, is_cross_constellation)
-        # Cross constellations have irregular I/Q level counts
+        """Determine QAM order from analysis results"""
         qam_orders = {
-            4: (2, 2),      # QPSK/4-QAM: 2x2 square
-            8: (4, 2),      # 8-QAM: rectangular or star (treating as rect)
-            16: (4, 4),     # 16-QAM: 4x4 square
-            32: (6, 6),     # 32-QAM: Cross from 6x6 minus corners (appears ~6 levels each axis)
-            64: (8, 8),     # 64-QAM: 8x8 square
-            128: (12, 12),  # 128-QAM: Cross pattern (~12 levels visible per axis)
-            256: (16, 16),  # 256-QAM: 16x16 square
-            512: (24, 24),  # 512-QAM: Cross pattern
-            1024: (32, 32), # 1024-QAM: 32x32 square
+            4: (2, 2), 16: (4, 4), 32: (6, 6), 64: (8, 8),
+            128: (12, 12), 256: (16, 16),
         }
         
         i_levels = grid_analysis['i_levels']
@@ -215,53 +162,22 @@ class ModulationClassifier:
         
         best_order = 4
         best_diff = float('inf')
-
-        # FORENSIC FIX: Track all candidate scores for uncertainty quantification
-        candidate_scores = {}
-
+        
         for order, (i, q) in qam_orders.items():
             grid_diff = abs(i_levels - i) + abs(q_levels - q)
             point_diff = abs(estimated_points - order)
             total_diff = grid_diff + point_diff * 0.1
-
-            # Convert difference to a similarity score (lower diff = higher score)
-            # Use exponential decay for more interpretable scoring
-            similarity_score = np.exp(-total_diff / 5.0)
-            candidate_scores[order] = similarity_score
-
+            
             if total_diff < best_diff:
                 best_diff = total_diff
                 best_order = order
-
-        # Normalize scores to probabilities
-        total_score = sum(candidate_scores.values())
-        candidate_probs = {k: v / total_score for k, v in candidate_scores.items()}
-
-        # Sort by probability for alternative hypotheses
-        sorted_candidates = sorted(candidate_probs.items(), key=lambda x: -x[1])
-        primary_prob = candidate_probs[best_order]
-        alternatives = [(f"{order}-QAM", prob)
-                        for order, prob in sorted_candidates
-                        if order != best_order and prob > 0.01][:3]
-
+        
         confidence = grid_analysis['grid_regularity'] * 100
-
-        # FORENSIC: Create uncertainty quantification
-        uncertainty = ForensicUncertainty(
-            primary_hypothesis=f"{best_order}-QAM",
-            primary_probability=primary_prob,
-            alternative_hypotheses=alternatives,
-            measurement_std_dev=float(1.0 - grid_analysis['grid_regularity']),
-            confidence_interval_95=(max(0, confidence - 15), min(100, confidence + 15)),
-            sample_size=int(grid_analysis.get('estimated_points', 0)),
-            methodology="Constellation clustering with grid regularity analysis"
-        )
-
+        
         return {
             'qam_order': best_order,
             'confidence_percent': min(confidence + 20, 100),
             'bits_per_symbol': int(np.log2(best_order)),
-            'uncertainty': uncertainty,
         }
     
     @classmethod
@@ -295,7 +211,6 @@ class ModulationClassifier:
                 is_ofdm=True,
                 ofdm_fft_size=best['fft_size'],
                 ofdm_cp_length=best['cp_length'],
-                uncertainty=qam_class.get('uncertainty'),
             )
         else:
             return ModulationClassification(
@@ -307,7 +222,6 @@ class ModulationClassifier:
                 i_levels=grid['i_levels'],
                 q_levels=grid['q_levels'],
                 grid_regularity=grid['grid_regularity'],
-                uncertainty=qam_class.get('uncertainty'),
             )
 
 
@@ -580,29 +494,16 @@ class QAMDemodulator:
 # =============================================================================
 
 class PRBSGenerator:
-    """Pseudo-Random Binary Sequence Generator
-
-    FORENSIC FIX v2.2.3: Corrected PRBS tap positions per ITU-T O.150/O.151 standards.
-    These are the industry-standard feedback polynomial tap positions used in
-    telecommunications testing equipment (Anritsu, Keysight, R&S).
-
-    Reference: ITU-T O.150 "General requirements for instrumentation for
-    performance measurements on digital transmission equipment"
-    """
-
+    """Pseudo-Random Binary Sequence Generator"""
+    
     POLYNOMIALS = {
-        # Format: (degree, [tap positions from MSB]) - represents x^n + x^tap + 1
-        'PRBS-7':  (7, [7, 6]),      # x^7 + x^6 + 1 (ITU-T O.150)
-        'PRBS-9':  (9, [9, 5]),      # x^9 + x^5 + 1 (ITU-T O.150)
-        'PRBS-11': (11, [11, 9]),    # x^11 + x^9 + 1 (ITU-T O.150)
-        'PRBS-15': (15, [15, 14]),   # x^15 + x^14 + 1 (ITU-T O.150)
-        'PRBS-20': (20, [20, 17]),   # x^20 + x^17 + 1 (ITU-T O.150) - FIXED: was [20, 3]
-        'PRBS-23': (23, [23, 18]),   # x^23 + x^18 + 1 (ITU-T O.150)
-        'PRBS-31': (31, [31, 28]),   # x^31 + x^28 + 1 (ITU-T O.150)
-        # Additional common PRBS patterns used in RF testing
-        'PRBS-6':  (6, [6, 5]),      # x^6 + x^5 + 1 (used in some legacy systems)
-        'PRBS-10': (10, [10, 7]),    # x^10 + x^7 + 1 (IEEE 802.3)
-        'PRBS-13': (13, [13, 12, 11, 8]),  # x^13 + x^12 + x^11 + x^8 + 1
+        'PRBS-7':  (7, [7, 6]),
+        'PRBS-9':  (9, [9, 5]),
+        'PRBS-11': (11, [11, 9]),
+        'PRBS-15': (15, [15, 14]),
+        'PRBS-20': (20, [20, 3]),
+        'PRBS-23': (23, [23, 18]),
+        'PRBS-31': (31, [31, 28]),
     }
     
     def __init__(self, prbs_type: str = 'PRBS-7'):

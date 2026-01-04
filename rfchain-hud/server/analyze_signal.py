@@ -3766,13 +3766,19 @@ class SignalAnalyzer:
             return 0.0, 0.0
     
     def plot_time_domain(self, data: cp.ndarray, filename: str = "01_time_domain.png",
-                         source_name: str = ""):
-        """Generate I/Q time domain plot with envelope."""
+                         source_name: str = "", metrics: 'SignalMetrics' = None,
+                         anomalies: dict = None):
+        """Generate I/Q time domain plot with envelope and annotations."""
         n_samples = min(len(data), self.config.time_domain_samples)
         subset = cp_asnumpy(data[:n_samples])
 
         time_us = np.arange(n_samples) / self.config.sample_rate * 1e6
         envelope = np.abs(subset)
+        
+        # Calculate key metrics for annotations
+        rms_power = np.sqrt(np.mean(np.abs(subset)**2))
+        peak_power = np.max(envelope)
+        duration_us = n_samples / self.config.sample_rate * 1e6
 
         fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
 
@@ -3786,23 +3792,83 @@ class SignalAnalyzer:
         axes[0].grid(True, alpha=0.3, color=self.colors['grid'])
         axes[0].set_title('I/Q Components', fontsize=12)
 
-        # Envelope Plot
+        # Envelope Plot with annotations
         axes[1].fill_between(time_us, envelope, alpha=0.3, color=self.colors['tertiary'])
         axes[1].plot(time_us, envelope, color=self.colors['tertiary'], linewidth=0.8)
+        
+        # Add RMS power line
+        axes[1].axhline(y=rms_power, color='#00ff00', linestyle='--', alpha=0.8,
+                       linewidth=1.5, label=f'RMS: {rms_power:.4f}')
+        
+        # Add peak power marker
+        peak_idx = np.argmax(envelope)
+        axes[1].scatter([time_us[peak_idx]], [peak_power], color='#ff4444', s=50, 
+                       zorder=5, marker='v', label=f'Peak: {peak_power:.4f}')
+        
+        # Detect and mark anomalies
+        if anomalies:
+            # Mark saturation regions (clipping)
+            if anomalies.get('saturation'):
+                max_val = np.max(np.abs(subset))
+                saturation_threshold = max_val * 0.99
+                sat_mask = envelope > saturation_threshold
+                if np.any(sat_mask):
+                    sat_regions = self._find_contiguous_regions(sat_mask)
+                    for start, end in sat_regions:
+                        axes[1].axvspan(time_us[start], time_us[min(end, len(time_us)-1)], 
+                                       alpha=0.3, color='#ff0000', label='Saturation' if start == sat_regions[0][0] else '')
+            
+            # Mark dropout regions (signal loss)
+            if anomalies.get('dropout'):
+                dropout_threshold = rms_power * 0.1
+                dropout_mask = envelope < dropout_threshold
+                if np.any(dropout_mask):
+                    dropout_regions = self._find_contiguous_regions(dropout_mask)
+                    for start, end in dropout_regions:
+                        if end - start > 10:  # Only mark significant dropouts
+                            axes[1].axvspan(time_us[start], time_us[min(end, len(time_us)-1)], 
+                                           alpha=0.3, color='#ffaa00', label='Dropout' if start == dropout_regions[0][0] else '')
+        
         axes[1].set_ylabel('Magnitude', fontsize=11)
         axes[1].set_xlabel('Time (μs)', fontsize=11)
         axes[1].grid(True, alpha=0.3, color=self.colors['grid'])
         axes[1].set_title('Signal Envelope', fontsize=12)
+        axes[1].legend(loc='upper right', fontsize=9)
+        
+        # Add metrics text box
+        metrics_text = f'Duration: {duration_us:.1f} μs\nSamples: {n_samples:,}\nRMS: {rms_power:.4f}\nPeak: {peak_power:.4f}'
+        if metrics:
+            metrics_text += f'\nPAPR: {metrics.papr_db:.1f} dB'
+        axes[1].text(0.02, 0.98, metrics_text, transform=axes[1].transAxes, fontsize=9,
+                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='black', 
+                    alpha=0.7, edgecolor=self.colors['primary']))
 
         header = self._get_plot_header(source_name)
         fig.suptitle(f'Time Domain Analysis ({n_samples:,} samples)\n{header}', fontsize=12)
         plt.tight_layout()
         self._save_figure(fig, filename)
     
+    def _find_contiguous_regions(self, mask: np.ndarray) -> list:
+        """Find contiguous True regions in a boolean mask."""
+        regions = []
+        in_region = False
+        start = 0
+        for i, val in enumerate(mask):
+            if val and not in_region:
+                start = i
+                in_region = True
+            elif not val and in_region:
+                regions.append((start, i))
+                in_region = False
+        if in_region:
+            regions.append((start, len(mask)))
+        return regions
+    
     def plot_frequency_domain(self, data: cp.ndarray,
                               filename: str = "02_frequency_domain.png",
-                              is_fft_data: bool = False, source_name: str = ""):
-        """Generate PSD plot with annotations."""
+                              is_fft_data: bool = False, source_name: str = "",
+                              metrics: 'SignalMetrics' = None, anomalies: dict = None):
+        """Generate PSD plot with bandwidth markers, peak labels, and key metrics."""
         with gpu_memory_pool():
             n = min(len(data), self.config.fft_size * 64)
             
@@ -3863,21 +3929,86 @@ class SignalAnalyzer:
         else:
             noise_floor = median_val  # Fall back to simple median
         ax.axhline(y=noise_floor, color=self.colors['secondary'], 
-                  linestyle='--', alpha=0.7, label=f'Est. Noise Floor: {noise_floor:.1f} dB')
+                  linestyle='--', alpha=0.7, label=f'Noise Floor: {noise_floor:.1f} dB')
+        
+        # Estimate and mark bandwidth region
+        signal_threshold = noise_floor + 6  # 6 dB above noise floor
+        signal_mask = mag_cpu > signal_threshold
+        if np.any(signal_mask):
+            signal_indices = np.where(signal_mask)[0]
+            if len(signal_indices) > 0:
+                bw_start_idx = signal_indices[0]
+                bw_end_idx = signal_indices[-1]
+                bw_start_freq = freqs[bw_start_idx]
+                bw_end_freq = freqs[bw_end_idx]
+                bandwidth_khz = bw_end_freq - bw_start_freq
+                
+                # Shade bandwidth region
+                ax.axvspan(bw_start_freq, bw_end_freq, alpha=0.15, color='#00ff00',
+                          label=f'Bandwidth: {bandwidth_khz:.1f} kHz')
+                
+                # Mark bandwidth boundaries
+                ax.axvline(x=bw_start_freq, color='#00ff00', linestyle=':', alpha=0.7, linewidth=1)
+                ax.axvline(x=bw_end_freq, color='#00ff00', linestyle=':', alpha=0.7, linewidth=1)
+        
+        # Find and label spectral peaks
+        from scipy.signal import find_peaks
+        peak_threshold = noise_floor + 10  # 10 dB above noise
+        peaks, properties = find_peaks(mag_cpu, height=peak_threshold, distance=len(mag_cpu)//20)
+        
+        # Label top 5 peaks
+        if len(peaks) > 0:
+            peak_heights = mag_cpu[peaks]
+            sorted_peak_indices = np.argsort(peak_heights)[::-1][:5]
+            for i, idx in enumerate(sorted_peak_indices):
+                peak_idx = peaks[idx]
+                peak_freq = freqs[peak_idx]
+                peak_mag = mag_cpu[peak_idx]
+                ax.annotate(f'{peak_freq:.1f} kHz\n{peak_mag:.1f} dB',
+                           xy=(peak_freq, peak_mag), xytext=(5, 10),
+                           textcoords='offset points', fontsize=8,
+                           color='#ffaa00', fontweight='bold',
+                           arrowprops=dict(arrowstyle='->', color='#ffaa00', lw=0.5))
+        
+        # Mark DC spike if present
+        if anomalies and anomalies.get('dc_spike'):
+            dc_idx = len(mag_cpu) // 2
+            ax.scatter([freqs[dc_idx]], [mag_cpu[dc_idx]], color='#ff0000', s=100,
+                      marker='x', linewidths=2, zorder=5, label='DC Spike')
+        
+        # Mark spurious signals if detected
+        if anomalies and anomalies.get('spurious_signals'):
+            ax.text(0.98, 0.02, '⚠ Spurious signals detected', transform=ax.transAxes,
+                   fontsize=9, color='#ff4444', ha='right', va='bottom',
+                   bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
         
         ax.set_xlabel('Frequency (kHz)', fontsize=11)
         ax.set_ylabel('Magnitude (dB)', fontsize=11)
         header = self._get_plot_header(source_name)
         ax.set_title(f'Power Spectral Density (Averaged Periodogram)\n{header}', fontsize=12)
         ax.grid(True, alpha=0.3, color=self.colors['grid'])
-        ax.legend(loc='upper right')
+        ax.legend(loc='upper right', fontsize=9)
+        
+        # Add metrics text box
+        metrics_text = f'Noise Floor: {noise_floor:.1f} dB'
+        if metrics:
+            if metrics.bandwidth_hz:
+                metrics_text += f'\nBandwidth: {metrics.bandwidth_hz/1000:.1f} kHz'
+            if metrics.snr_estimate_db:
+                metrics_text += f'\nSNR: {metrics.snr_estimate_db:.1f} dB'
+            if metrics.freq_offset_hz:
+                metrics_text += f'\nFreq Offset: {metrics.freq_offset_hz:.1f} Hz'
+        ax.text(0.02, 0.98, metrics_text, transform=ax.transAxes, fontsize=9,
+               verticalalignment='top', bbox=dict(boxstyle='round', facecolor='black',
+               alpha=0.7, edgecolor=self.colors['primary']))
 
         plt.tight_layout()
         self._save_figure(fig, filename)
 
     def plot_spectrogram(self, data: cp.ndarray, filename: str = "03_spectrogram.png",
-                         source_name: str = ""):
-        """Generate high-resolution spectrogram."""
+                         source_name: str = "", metrics: 'SignalMetrics' = None,
+                         anomalies: dict = None):
+        """Generate high-resolution spectrogram with bandwidth and anomaly annotations."""
         # Limit data size for spectrogram to avoid memory issues
         max_samples = int(self.config.sample_rate * 10)  # 10 seconds max
         data_limited = cp_asnumpy(data[:max_samples])
@@ -3897,12 +4028,47 @@ class SignalAnalyzer:
             mode='psd'
         )
         
+        # Draw bandwidth boundaries if metrics available
+        if metrics and metrics.bandwidth_hz:
+            bw_hz = metrics.bandwidth_hz
+            center_freq = 0  # Baseband
+            upper_bw = center_freq + bw_hz / 2
+            lower_bw = center_freq - bw_hz / 2
+            ax.axhline(y=upper_bw, color='#00ff00', linestyle='--', alpha=0.7, linewidth=1.5,
+                      label=f'Bandwidth: {bw_hz/1000:.1f} kHz')
+            ax.axhline(y=lower_bw, color='#00ff00', linestyle='--', alpha=0.7, linewidth=1.5)
+        
+        # Mark anomaly time regions
+        if anomalies:
+            # Mark dropout events
+            if anomalies.get('dropout'):
+                ax.text(0.02, 0.02, '⚠ Signal dropout detected', transform=ax.transAxes,
+                       fontsize=9, color='#ffaa00', va='bottom',
+                       bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
+            
+            # Mark saturation events
+            if anomalies.get('saturation'):
+                ax.text(0.02, 0.08, '⚠ Saturation detected', transform=ax.transAxes,
+                       fontsize=9, color='#ff4444', va='bottom',
+                       bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
+        
         ax.set_xlabel('Time (s)', fontsize=11)
         ax.set_ylabel('Frequency (Hz)', fontsize=11)
         header = self._get_plot_header(source_name)
         ax.set_title(f'Spectrogram (Short-Time Fourier Transform)\n{header}', fontsize=12)
+        
+        # Add metrics text box
+        duration_s = len(data_limited) / self.config.sample_rate
+        metrics_text = f'Duration: {duration_s:.2f} s\nFFT Size: {nfft}\nSample Rate: {self.config.sample_rate/1e6:.2f} MHz'
+        if metrics:
+            if metrics.bandwidth_hz:
+                metrics_text += f'\nBandwidth: {metrics.bandwidth_hz/1000:.1f} kHz'
+        ax.text(0.98, 0.98, metrics_text, transform=ax.transAxes, fontsize=9,
+               verticalalignment='top', ha='right',
+               bbox=dict(boxstyle='round', facecolor='black', alpha=0.7, edgecolor='#00ffff'))
 
-        _ = plt.colorbar(im, ax=ax, label='Power/Freq (dB/Hz)')
+        cbar = plt.colorbar(im, ax=ax, label='Power/Freq (dB/Hz)')
+        ax.legend(loc='upper left', fontsize=9)
 
         plt.tight_layout()
         self._save_figure(fig, filename)
@@ -3955,29 +4121,83 @@ class SignalAnalyzer:
         self._save_figure(fig, filename)
 
     def plot_constellation(self, data: cp.ndarray, filename: str = "05_constellation.png",
-                           source_name: str = ""):
-        """Generate constellation diagram with density visualization."""
+                           source_name: str = "", metrics: 'SignalMetrics' = None,
+                           modulation_info: dict = None):
+        """Generate constellation diagram with EVM, ideal points, and modulation info."""
         n = min(len(data), self.config.constellation_max_points)
         subset = cp_asnumpy(data[:n])
         
         i_data = subset.real
         q_data = subset.imag
         
+        # Normalize data for better visualization
+        max_amp = np.max(np.abs(subset))
+        if max_amp > 0:
+            i_norm = i_data / max_amp
+            q_norm = q_data / max_amp
+        else:
+            i_norm, q_norm = i_data, q_data
+        
         fig, axes = plt.subplots(1, 2, figsize=(14, 7))
         
-        # Scatter plot
-        axes[0].scatter(i_data, q_data, s=1, alpha=0.3, 
-                       color=self.colors['tertiary'], rasterized=True)
+        # Scatter plot with color-coded phase error
+        phase = np.angle(subset)
+        axes[0].scatter(i_norm, q_norm, s=1, alpha=0.3, c=phase, cmap='hsv', rasterized=True)
         axes[0].set_xlabel('In-Phase (I)', fontsize=11)
         axes[0].set_ylabel('Quadrature (Q)', fontsize=11)
-        axes[0].set_title('Constellation Diagram', fontsize=12)
+        axes[0].set_title('Constellation Diagram (color = phase)', fontsize=12)
         axes[0].grid(True, alpha=0.3, color=self.colors['grid'])
         axes[0].axis('equal')
         axes[0].axhline(y=0, color='gray', linewidth=0.5)
         axes[0].axvline(x=0, color='gray', linewidth=0.5)
         
+        # Draw ideal constellation points if modulation detected
+        mod_type = None
+        if modulation_info:
+            mod_type = modulation_info.get('type', '').upper()
+        elif metrics and hasattr(metrics, 'modulation_type'):
+            mod_type = str(metrics.modulation_type).upper() if metrics.modulation_type else None
+        
+        ideal_points = None
+        if mod_type:
+            if 'QPSK' in mod_type or '4QAM' in mod_type:
+                # QPSK ideal points
+                ideal_points = np.array([1+1j, 1-1j, -1+1j, -1-1j]) / np.sqrt(2)
+            elif '16QAM' in mod_type:
+                # 16-QAM ideal points
+                levels = [-3, -1, 1, 3]
+                ideal_points = np.array([complex(i, q) for i in levels for q in levels]) / np.sqrt(10)
+            elif '64QAM' in mod_type:
+                # 64-QAM ideal points
+                levels = [-7, -5, -3, -1, 1, 3, 5, 7]
+                ideal_points = np.array([complex(i, q) for i in levels for q in levels]) / np.sqrt(42)
+            elif 'BPSK' in mod_type:
+                ideal_points = np.array([1+0j, -1+0j])
+            elif '8PSK' in mod_type:
+                ideal_points = np.exp(1j * np.arange(8) * np.pi / 4)
+        
+        if ideal_points is not None:
+            axes[0].scatter(ideal_points.real, ideal_points.imag, s=100, c='#ff0000',
+                          marker='x', linewidths=2, zorder=5, label=f'Ideal {mod_type}')
+            axes[0].legend(loc='upper right', fontsize=9)
+        
+        # Calculate EVM if we have ideal points
+        evm_percent = None
+        if ideal_points is not None and len(subset) > 0:
+            # Simple EVM calculation: find closest ideal point for each sample
+            normalized_data = subset / max_amp if max_amp > 0 else subset
+            errors = []
+            for sample in normalized_data[:min(1000, len(normalized_data))]:
+                distances = np.abs(sample - ideal_points)
+                min_dist = np.min(distances)
+                errors.append(min_dist)
+            rms_error = np.sqrt(np.mean(np.array(errors)**2))
+            ref_power = np.sqrt(np.mean(np.abs(ideal_points)**2))
+            if ref_power > 0:
+                evm_percent = (rms_error / ref_power) * 100
+        
         # 2D Histogram (density)
-        h, xedges, yedges = np.histogram2d(i_data, q_data, bins=256)
+        h, xedges, yedges = np.histogram2d(i_norm, q_norm, bins=256)
         im = axes[1].imshow(h.T, origin='lower', aspect='equal',
                            extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
                            cmap='hot', norm=LogNorm(vmin=1, vmax=h.max()))
@@ -3985,6 +4205,27 @@ class SignalAnalyzer:
         axes[1].set_ylabel('Quadrature (Q)', fontsize=11)
         axes[1].set_title('Constellation Density', fontsize=12)
         plt.colorbar(im, ax=axes[1], label='Sample Count')
+        
+        # Add metrics text box
+        metrics_text = f'Samples: {n:,}'
+        if mod_type:
+            metrics_text += f'\nModulation: {mod_type}'
+        if evm_percent is not None:
+            metrics_text += f'\nEVM: {evm_percent:.1f}%'
+            # EVM quality assessment
+            if evm_percent < 5:
+                quality = 'Excellent'
+            elif evm_percent < 10:
+                quality = 'Good'
+            elif evm_percent < 20:
+                quality = 'Fair'
+            else:
+                quality = 'Poor'
+            metrics_text += f' ({quality})'
+        
+        axes[0].text(0.02, 0.98, metrics_text, transform=axes[0].transAxes, fontsize=9,
+                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='black',
+                    alpha=0.7, edgecolor=self.colors['primary']))
 
         header = self._get_plot_header(source_name)
         fig.suptitle(f'I/Q Constellation ({n:,} samples)\n{header}', fontsize=12)

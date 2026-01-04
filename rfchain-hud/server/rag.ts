@@ -13,8 +13,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { ENV } from './_core/env';
 import { generateEmbedding, isEmbeddingError, cosineSimilarity } from './_core/embeddings';
-import { db } from './db';
+import { getDb } from './db';
 import { analysisResults, analysisEmbeddings, forensicReports, signalUploads } from '../drizzle/schema';
+import type { AnalysisResult, SignalUpload, ForensicReport, AnalysisEmbedding } from '../drizzle/schema';
 import { eq, desc, and, isNotNull } from 'drizzle-orm';
 
 // Types
@@ -232,6 +233,11 @@ export function createSignalDocument(
  * Index a signal analysis for RAG retrieval
  */
 export async function indexAnalysis(analysisId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) {
+    console.error('Database not available');
+    return false;
+  }
   try {
     // Get analysis data
     const [analysis] = await db
@@ -327,6 +333,11 @@ export async function indexAnalysis(analysisId: number): Promise<boolean> {
  */
 export async function loadEmbeddingCache(): Promise<void> {
   if (cacheLoaded) return;
+  const db = await getDb();
+  if (!db) {
+    console.warn('Database not available for embedding cache');
+    return;
+  }
   
   try {
     const embeddings = await db
@@ -389,7 +400,7 @@ export async function searchSimilarAnalyses(
   // Calculate similarities
   const results: RAGSearchResult[] = [];
   
-  for (const [analysisId, cached] of embeddingCache) {
+  for (const [analysisId, cached] of Array.from(embeddingCache.entries())) {
     const similarity = cosineSimilarity(queryEmbedding, cached.embedding);
     
     if (similarity >= threshold) {
@@ -488,6 +499,10 @@ export async function backfillEmbeddings(
   } = {}
 ): Promise<{ indexed: number; failed: number; total: number }> {
   const { batchSize = 10, onProgress } = options;
+  const db = await getDb();
+  if (!db) {
+    return { indexed: 0, failed: 0, total: 0 };
+  }
   
   // Get all analyses without embeddings
   const allAnalyses = await db
@@ -499,8 +514,8 @@ export async function backfillEmbeddings(
     .select({ analysisId: analysisEmbeddings.analysisId })
     .from(analysisEmbeddings);
   
-  const existingIds = new Set(existingEmbeddings.map(e => e.analysisId));
-  const toIndex = allAnalyses.filter(a => !existingIds.has(a.id));
+  const existingIds = new Set(existingEmbeddings.map((e: { analysisId: number | null }) => e.analysisId));
+  const toIndex = allAnalyses.filter((a: { id: number }) => !existingIds.has(a.id));
   
   let indexed = 0;
   let failed = 0;
@@ -537,11 +552,15 @@ export async function getRAGStats(): Promise<{
   pendingIndexing: number;
   cacheSize: number;
 }> {
+  const db = await getDb();
+  if (!db) {
+    return { totalEmbeddings: 0, totalAnalyses: 0, pendingIndexing: 0, cacheSize: embeddingCache.size };
+  }
   const [embeddingCount] = await db
     .select({ count: analysisEmbeddings.id })
     .from(analysisEmbeddings);
   
-  const [analysisCount] = await db
+  const [analysisCount]: any[] = await db
     .select({ count: analysisResults.id })
     .from(analysisResults);
   

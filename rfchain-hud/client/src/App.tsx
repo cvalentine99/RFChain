@@ -11,6 +11,8 @@ import Forensics from "./pages/Forensics";
 import Settings from "./pages/Settings";
 import Compare from "./pages/Compare";
 import Login from "./pages/Login";
+import BatchUpload from "./pages/BatchUpload";
+import SignatureLibrary from "./pages/SignatureLibrary";
 
 function Router() {
   return (
@@ -24,6 +26,8 @@ function Router() {
       <Route path="/settings" component={Settings} />
       <Route path="/compare" component={Compare} />
       <Route path="/login" component={Login} />
+      <Route path="/batch" component={BatchUpload} />
+      <Route path="/signatures" component={SignatureLibrary} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
