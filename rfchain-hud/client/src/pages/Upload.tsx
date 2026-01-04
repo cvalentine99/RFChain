@@ -459,10 +459,15 @@ export default function Upload() {
     processingRef.current = false;
   };
 
-  const pauseBatchProcessing = () => {
+  const pauseBatchProcessing = async () => {
+    const wasProcessing = processingRef.current;
     processingRef.current = false;
     setIsProcessing(false);
-    toast.info("Batch processing paused");
+    // Wait a tick to ensure any in-flight operations see the flag change
+    await new Promise(resolve => setTimeout(resolve, 0));
+    if (wasProcessing) {
+      toast.info("Batch processing paused");
+    }
   };
 
   const uploadAll = async () => {

@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 export default function Forensics() {
   const params = useParams<{ id?: string }>();
-  const analysisId = params.id ? parseInt(params.id) : undefined;
+  const analysisId = params.id ? parseInt(params.id, 10) : undefined;
 
   if (analysisId) {
     return <ForensicDetail analysisId={analysisId} />;
@@ -410,7 +410,13 @@ function PdfExportButton({ analysisId }: { analysisId: number }) {
       const result = await generatePdf.mutateAsync({ analysisId });
       
       // Convert base64 to blob and download
-      const byteCharacters = atob(result.pdf);
+      let byteCharacters: string;
+      try {
+        byteCharacters = atob(result.pdf);
+      } catch (e) {
+        console.error('Invalid base64 PDF data:', e);
+        throw new Error('Failed to decode PDF data');
+      }
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) {
         byteNumbers[i] = byteCharacters.charCodeAt(i);

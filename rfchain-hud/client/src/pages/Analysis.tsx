@@ -8,7 +8,7 @@ import { useMemo } from "react";
 
 export default function Analysis() {
   const params = useParams<{ id?: string }>();
-  const analysisId = params.id ? parseInt(params.id) : undefined;
+  const analysisId = params.id ? parseInt(params.id, 10) : undefined;
 
   // If we have an ID, show the detail view
   if (analysisId) {

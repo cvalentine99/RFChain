@@ -481,7 +481,7 @@ function ComparisonSummary({
     }
 
     // Bandwidth comparison
-    if (left.bandwidthHz !== null && right.bandwidthHz !== null) {
+    if (left.bandwidthHz !== null && right.bandwidthHz !== null && left.bandwidthHz !== 0) {
       const bwRatio = right.bandwidthHz / left.bandwidthHz;
       if (bwRatio > 1.2 || bwRatio < 0.8) {
         results.push({

@@ -40,11 +40,15 @@ export async function healthCheck(): Promise<{ connected: boolean; version?: str
     }
     // Simple query to verify connection
     const result = await db.execute(sql`SELECT VERSION() as version`);
-    const rows = result as unknown as [Array<{ version: string }>];
-    return { 
-      connected: true, 
-      version: rows?.[0]?.[0]?.version || 'unknown'
-    };
+    // Safely extract version from result
+    let version = 'unknown';
+    if (Array.isArray(result) && result.length > 0) {
+      const firstRow = Array.isArray(result[0]) ? result[0][0] : result[0];
+      if (firstRow && typeof firstRow === 'object' && 'version' in firstRow) {
+        version = String(firstRow.version);
+      }
+    }
+    return { connected: true, version };
   } catch (error) {
     console.error('[Database] Health check failed:', error);
     return { connected: false };

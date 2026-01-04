@@ -1,25 +1,30 @@
 [Unit]
 Description=RFChain HUD - Jarvis Signal Analyzer
 Documentation=https://github.com/cvalentine99/RFChain
-After=network.target network-online.target mysql.service
+After=network.target network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=cvalentine
-Group=cvalentine
-WorkingDirectory=/home/cvalentine/RFChain/rfchain-hud
+User=rfchain
+Group=rfchain
+WorkingDirectory=/opt/rfchain-hud
 
 # Environment setup
 Environment=NODE_ENV=production
 Environment=PORT=3007
-EnvironmentFile=/home/cvalentine/RFChain/rfchain-hud/.env.local
+Environment=RFCHAIN_INSTALL_DIR=/opt/rfchain-hud
+Environment=RFCHAIN_CONDA_ENV=rfchain-hud
+Environment=RFCHAIN_DB_TIMEOUT=10
+EnvironmentFile=/opt/rfchain-hud/.env.local
 
-# Pre-start dependency checks (optional - remove if check-deps.sh not installed)
-# ExecStartPre=/home/cvalentine/RFChain/rfchain-hud/deploy/check-deps.sh
+# Pre-start dependency checks
+# -: prefix means don't fail if script returns non-zero (warnings only)
+# Without prefix, critical failures will prevent service start
+ExecStartPre=/opt/rfchain-hud/deploy/check-deps.sh
 
-# Start the production server (dist/index.js is the bundled output)
-ExecStart=/usr/bin/node /home/cvalentine/RFChain/rfchain-hud/dist/index.js
+# Conda environment activation and server start
+ExecStart=/bin/bash -c 'source /home/rfchain/miniconda3/etc/profile.d/conda.sh && conda activate rfchain-hud && exec node dist/server/index.js'
 
 # Graceful shutdown
 ExecStop=/bin/kill -SIGTERM $MAINPID
@@ -31,8 +36,17 @@ RestartSec=10
 StartLimitIntervalSec=60
 StartLimitBurst=3
 
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/opt/rfchain-hud/uploads /opt/rfchain-hud/analysis_output /opt/rfchain-hud/logs
+
 # Resource limits
 LimitNOFILE=65536
+MemoryMax=4G
+CPUQuota=400%
 
 # Logging
 StandardOutput=journal

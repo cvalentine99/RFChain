@@ -1,5 +1,5 @@
 import "dotenv/config";
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -14,6 +14,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { fileURLToPath } from "url";
+import { sdk } from "./sdk";
+import { COOKIE_NAME } from "@shared/const";
 
 // ESM compatibility for __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -48,19 +50,28 @@ function cleanPythonEnvironment() {
   return cleanEnv;
 }
 
-function isPortAvailable(port: number): Promise<boolean> {
+// Try to bind to a port directly to avoid TOCTOU race condition
+function tryBindPort(server: ReturnType<typeof createServer>, port: number): Promise<boolean> {
   return new Promise(resolve => {
-    const server = net.createServer();
+    const onError = (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        resolve(false);
+      } else {
+        console.error(`Port ${port} error:`, err);
+        resolve(false);
+      }
+    };
+    server.once('error', onError);
     server.listen(port, () => {
-      server.close(() => resolve(true));
+      server.removeListener('error', onError);
+      resolve(true);
     });
-    server.on("error", () => resolve(false));
   });
 }
 
-async function findAvailablePort(startPort: number = 3000): Promise<number> {
+async function bindToAvailablePort(server: ReturnType<typeof createServer>, startPort: number = 3000): Promise<number> {
   for (let port = startPort; port < startPort + 20; port++) {
-    if (await isPortAvailable(port)) {
+    if (await tryBindPort(server, port)) {
       return port;
     }
   }
@@ -85,7 +96,42 @@ async function startServer() {
   // Serve analysis output files (plots, metrics) as static files
   app.use("/analysis_output", express.static(analysisOutputDir));
   
-  // File upload endpoint - saves locally
+  // Authentication middleware for REST endpoints
+  const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const user = await sdk.authenticateRequest(req);
+      (req as any).user = user;
+      next();
+    } catch (error) {
+      console.warn("[Auth] REST endpoint auth failed:", error);
+      res.status(401).json({ error: "Authentication required" });
+    }
+  };
+  
+  // Simple rate limiting (in-memory, per-IP)
+  const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+  const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
+  const RATE_LIMIT_MAX = 30; // 30 requests per minute
+  
+  const rateLimit = (req: Request, res: Response, next: NextFunction) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const record = rateLimitMap.get(ip);
+    
+    if (!record || now > record.resetTime) {
+      rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+      return next();
+    }
+    
+    if (record.count >= RATE_LIMIT_MAX) {
+      return res.status(429).json({ error: "Too many requests. Please try again later." });
+    }
+    
+    record.count++;
+    next();
+  };
+  
+  // File upload endpoint - saves locally (PROTECTED)
   const upload = multer({ 
     storage: multer.diskStorage({
       destination: (req, file, cb) => cb(null, uploadsDir),
@@ -97,7 +143,7 @@ async function startServer() {
     limits: { fileSize: 500 * 1024 * 1024 } // 500MB limit
   });
   
-  app.post("/api/upload", upload.single("file"), async (req, res) => {
+  app.post("/api/upload", rateLimit, requireAuth, upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file provided" });
@@ -135,7 +181,7 @@ async function startServer() {
     limits: { fileSize: 16 * 1024 * 1024 } // 16MB limit for audio
   });
   
-  app.post("/api/audio/upload", audioUpload.single("audio"), async (req, res) => {
+  app.post("/api/audio/upload", rateLimit, requireAuth, audioUpload.single("audio"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No audio file provided" });
@@ -166,7 +212,7 @@ async function startServer() {
   // Serve analysis output files statically
   app.use("/analysis_output", express.static(analysisOutputDir));
   
-  app.post("/api/analyze", express.json(), async (req, res) => {
+  app.post("/api/analyze", rateLimit, requireAuth, express.json(), async (req, res) => {
     try {
       const { localPath, uploadId, sampleRate, centerFreq, dataFormat, enableDigital, enableV3 } = req.body;
       
@@ -316,16 +362,13 @@ async function startServer() {
     serveStatic(app);
   }
 
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  const preferredPort = parseInt(process.env.PORT || "3000", 10);
+  const port = await bindToAvailablePort(server, preferredPort);
 
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
-
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-  });
+  console.log(`Server running on http://localhost:${port}/`);
 }
 
 startServer().catch(console.error);

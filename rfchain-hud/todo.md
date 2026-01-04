@@ -232,3 +232,15 @@
 - [x] Verify Node.js and conda environment
 - [x] Update systemd service with ExecStartPre
 - [x] Update DEPLOY.md with troubleshooting info
+
+
+## Critical Deployment Fixes (URGENT)
+- [ ] Fix database dialect mismatch - MySQL in code vs SQLite in env template
+- [ ] Add authentication to upload/analysis endpoints (currently public)
+- [ ] Fix Python path - remove hardcoded /usr/bin/python3.11, use env vars
+- [ ] Fix .env.local template - add all required env vars
+- [ ] Fix start.sh - proper production mode with build
+- [ ] Add rate limiting and file validation to uploads
+- [ ] Fix port binding - don't auto-select, fail if busy
+- [ ] Fix createSignalUpload null handling
+- [ ] Fix storage helpers for missing env vars gracefully
