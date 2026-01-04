@@ -7,4 +7,9 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  // Python configuration for signal analysis
+  pythonPath: process.env.PYTHON_PATH ?? "python3",
+  analysisScriptPath: process.env.ANALYSIS_SCRIPT_PATH ?? "",
+  analysisOutputDir: process.env.ANALYSIS_OUTPUT_DIR ?? "",
+  uploadDir: process.env.UPLOAD_DIR ?? "",
 };

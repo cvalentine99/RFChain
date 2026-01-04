@@ -205,15 +205,16 @@ async function startServer() {
       console.log("[Analysis] Script path:", scriptPath);
       console.log("[Analysis] Args:", args);
       
+      // Get Python path from environment or use default
+      const pythonPath = process.env.PYTHON_PATH || "python3";
+      console.log("[Analysis] Using Python:", pythonPath);
+      
       // Execute analysis with clean Python environment
-      const python = spawn("/usr/bin/python3.11", args, { 
+      const python = spawn(pythonPath, args, { 
         cwd: path.dirname(scriptPath),
         env: {
           ...cleanPythonEnvironment(),
-          PYTHONDONTWRITEBYTECODE: "1",
-          // Explicitly set Python paths to system locations
-          PYTHONPATH: "/usr/lib/python3.11:/usr/local/lib/python3.11/dist-packages",
-          PYTHONHOME: "/usr"
+          PYTHONDONTWRITEBYTECODE: "1"
         }
       });
       
