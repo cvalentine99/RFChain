@@ -236,13 +236,15 @@ export const appRouter = router({
         // Update signal upload status
         await db.updateSignalUploadStatus(input.signalUploadId, "completed");
         
-        // Auto-generate embedding for RAG (async, don't block response)
+        // Auto-generate embedding and RAG context (async, don't block response)
         (async () => {
           try {
             const { generateEmbedding, formatAnalysisForEmbedding, isEmbeddingError } = await import("./_core/embeddings");
+            const { augmentAnalysisWithRAG } = await import("./rag_augment");
             const upload = await db.getSignalUpload(input.signalUploadId);
             
-            const contentText = formatAnalysisForEmbedding({
+            // Prepare metrics object for RAG
+            const metricsForRAG = {
               filename: upload?.originalName,
               avgPowerDbm: analysisMetrics.avg_power_dbm,
               peakPowerDbm: analysisMetrics.peak_power_dbm,
@@ -254,8 +256,25 @@ export const appRouter = router({
               sampleCount: analysisMetrics.sample_count,
               anomalies: anomalies,
               fullMetrics: fullMetricsWithPlots,
-            });
+            };
             
+            // Generate RAG augmented context
+            const ragContext = await augmentAnalysisWithRAG(analysisId, metricsForRAG, ctx.user.id);
+            
+            // Update analysis with RAG context
+            const { getDb } = await import("./db");
+            const dbInstance = await getDb();
+            if (dbInstance) {
+              const { analysisResults } = await import("../drizzle/schema");
+              const { eq } = await import("drizzle-orm");
+              await dbInstance.update(analysisResults)
+                .set({ ragContext: ragContext })
+                .where(eq(analysisResults.id, analysisId));
+              console.log(`[RAG] Generated augmented context for analysis ${analysisId}`);
+            }
+            
+            // Generate embedding for future searches
+            const contentText = formatAnalysisForEmbedding(metricsForRAG);
             const embeddingResult = await generateEmbedding(contentText);
             
             if (!isEmbeddingError(embeddingResult)) {
@@ -274,7 +293,7 @@ export const appRouter = router({
               console.log(`[RAG] Auto-generated embedding for analysis ${analysisId}`);
             }
           } catch (err) {
-            console.warn(`[RAG] Failed to auto-generate embedding for analysis ${analysisId}:`, err);
+            console.warn(`[RAG] Failed to generate RAG context for analysis ${analysisId}:`, err);
           }
         })();
         

@@ -81,6 +81,9 @@ export const analysisResults = mysqlTable("analysis_results", {
   // Full metrics JSON
   fullMetrics: json("fullMetrics"),
   
+  // RAG augmented context (pattern matches, recommendations, similar signals)
+  ragContext: json("ragContext"),
+  
   // Visualization URLs (S3)
   timeDomainUrl: varchar("timeDomainUrl", { length: 1024 }),
   frequencyDomainUrl: varchar("frequencyDomainUrl", { length: 1024 }),

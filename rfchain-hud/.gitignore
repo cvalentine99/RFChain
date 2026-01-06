@@ -105,10 +105,3 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
-
-# User data - do not commit
-uploads/*.bin
-uploads/*.raw
-uploads/*.iq
-analysis_output/
-*.bin
